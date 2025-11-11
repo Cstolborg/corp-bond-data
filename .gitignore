@@ -1,0 +1,66 @@
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+Manifest.toml
+
+# Data files
+data/
+data/trace/*.sas7bdat
+data/trace/*.csv
+data/wrds/*.sas7bdat
+data/wrds/*.csv
+data/ice_new/*.csv
+data/output/*.csv
+data/output/*.pq
+data/data_to_share/*
+*.parquet
+
+# Keep data directory structure but not data files
+!data/.gitkeep
+!data/trace/.gitkeep
+!data/wrds/.gitkeep
+!data/ice_new/.gitkeep
+!data/output/.gitkeep
+
+# Test outputs
+tests/old_output/*
+!tests/old_output/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.env
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Jupyter notebooks (if any)
+.ipynb_checkpoints
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Select-String \"agg_daily_trace_to_month\" -Context 0,5)",
+      "Bash(\"C:\\Users\\chris\\.julia\\juliaup\\julia-1.10.10+0.x64.w64.mingw32\\bin\\julia.exe\" --project=. -e \"using RCall; println(\"\"R Home: \"\", rcopy(R\"\"R.home()\"\")); println(\"\"Library Paths: \"\"); rcopy(R\"\".libPaths()\"\") |> println\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
