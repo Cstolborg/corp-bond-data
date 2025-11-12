@@ -22,8 +22,10 @@ function compute_illiq(trace_daily)
     return combine(groupby(trace_daily, [:cusip, :eom]), [:log_price, :log_price_lag]=>((p, p_lag)-> -1. * cov(p, p_lag))=>:illiq)
 end
 
-function get_dates(;trace=true)
-    if trace==true
+function get_dates(;trace=true, file=nothing)
+    if file !== nothing
+        dates = CSV.read(file, DataFrame) |>x->dropmissing(x,:RealDates) |>x->@transform(x, :cusip, :eom=lastdayofmonth.(:RealDates))
+    elseif trace==true
         dates = CSV.read("data/output/date_vectors_trace.csv", DataFrame) |>x->dropmissing(x,:RealDates) |>x->@transform(x, :cusip, :eom=lastdayofmonth.(:RealDates))
     else
         dates = CSV.read("data/output/date_vectors_warga_ice.csv", DataFrame) |>x->dropmissing(x,:RealDates) |>x->@transform(x, :cusip, :eom=lastdayofmonth.(:RealDates))
@@ -50,8 +52,8 @@ function get_temporal_features(dates; n_expand=12)
     return df
 end
 
-function add_temporal_features(df; trace=true)
-    dates = get_dates(trace=trace)
+function add_temporal_features(df; trace=true, file=nothing)
+    dates = get_dates(trace=trace, file=file)
     dates1 = get_temporal_features(dates, n_expand=12)
 
     df = leftjoin(df, dates1, on=[:cusip, :date=>:eom]) |> x->sort(x, [:cusip, :date])

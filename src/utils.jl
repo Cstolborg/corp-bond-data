@@ -36,6 +36,10 @@ In-place version of replace_nans for DataFrame.
 """
 replace_nans!(df::AbstractDataFrame; replace_val=missing) = transform!(df, All() .=> ByRow(x->replace_nans(x; replace_val=replace_val)), renamecols=false)
 
+replace_nans_zero(x; replace_val=missing) = ismissing(x) || (x isa Number && isnan(x)) || (x isa Number && iszero(x)) ? replace_val : x  # Replace NaN with replace_val
+replace_nans_zero(df::AbstractDataFrame; replace_val=missing) = transform(df, All() .=> ByRow(x->replace_nans_zero(x; replace_val=replace_val)), renamecols=false)
+
+
 """
     ffill(v)
 

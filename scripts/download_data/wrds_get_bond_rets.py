@@ -60,6 +60,19 @@ if __name__ == '__main__':
     #PATH = "./data/wrds/"
     PATH = r'c:\\Users\\chris\\CBS Dropbox\\Christian Stolborg\\corp-bond-data\\data\\wrds\\'
 
+    # Direct download from FRED (no API key or extra packages needed!)
+    # ICE BofA 15+ Year US Corporate Index Total Return Index Value
+    bofa_prices = 'BAMLCC8A015PYTRIV'
+    url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={bofa_prices}'
+    fred = pd.read_csv(url, parse_dates=['observation_date'])
+    fred.to_csv(PATH + "BAMLCC8A015PYTRIV.csv", index=False)
+
+    # CBOE Volatility Index: VIX
+    vix = 'VIXCLS'
+    url = f'https://fred.stlouisfed.org/graph/fredgraph.csv?id={vix}'
+    vix_df = pd.read_csv(url, parse_dates=['observation_date'])
+    vix_df.to_csv(PATH + "VIXCLS.csv", index=False)
+
     # Load bond returns from WRDS
     conn = wrds.Connection(wrds_username='cstolborg')
 

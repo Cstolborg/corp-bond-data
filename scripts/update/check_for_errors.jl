@@ -16,7 +16,7 @@ Configuration:
 Input files (from update_bond_data.jl):
     - data/output/update_YYYY_MM_DD/bonds.csv
     - data/output/update_YYYY_MM_DD/trace_daily_PERIOD.pq
-    - data/trace/trace_prices_PERIOD.sas7bdat (intraday data)
+    - data/wrds/trace_prices_PERIOD.sas7bdat (intraday data)
 
 Output:
     - Excel files in data/output/update_YYYY_MM_DD/excel_files/
@@ -32,22 +32,9 @@ using DataFramesMeta, Dates, CSV, Parquet
 using SASLib
 using XLSX
 
-include("../src/main.jl")
-include("utils_clean_data.jl")
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-UPDATE_DATE = "2025_01_13"  # Must match the update directory
-TIMEPERIOD = "_2021_2023"   # Must match the TRACE file suffix
-EXTREME_RETURN_THRESHOLD = 0.326  # 32.6% absolute return threshold
-N_MONTHS_BACK = 4      # Months of data to show before error
-N_MONTHS_FORWARD = 2   # Months of data to show after error
-
-PATH = "data/output/update_$(UPDATE_DATE)/"
-EXCEL_PATH = PATH * "excel_files/"
-!isdir(EXCEL_PATH) && mkpath(EXCEL_PATH)
+include("../../src/main.jl")
+include("../utils/utils_clean_data.jl")
+include("../../config/update_config.jl")
 
 println("\n" * "="^80)
 println("Checking for Extreme Bond Returns")
@@ -62,7 +49,7 @@ println("="^80 * "\n")
 # ============================================================================
 
 println("[1/5] Loading bond return data...")
-bonds = CSV.read(PATH*"bonds.csv", DataFrame)
+bonds = CSV.read(PATH*"bonds_full.csv", DataFrame)
 
 # Get date range for filtering
 date_range = extrema(bonds.date)
@@ -106,7 +93,7 @@ println("\n[3/5] Loading TRACE data for flagged bonds...")
 cusips = unique(bonds_extreme, [:cusip])[!, [:cusip]]
 
 # Load intraday data
-trace_intraday = DataLoader.load_trace_intraday(file="trace_prices"*TIMEPERIOD*".sas7bdat")
+trace_intraday = DataLoader.load_trace_intraday(file="data/wrds/trace_prices"*TIMEPERIOD*".sas7bdat")
 trace_intraday = innerjoin(trace_intraday, cusips, on=:cusip)
 CSV.write(PATH*"trace_intraday_to_check.csv", trace_intraday)
 println("✓ Loaded intraday data: $(nrow(trace_intraday)) trades")

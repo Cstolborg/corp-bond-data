@@ -26,8 +26,8 @@ using DataFramesMeta, Dates, CSV, Parquet
 using ShiftedArrays: lag, lead
 
 # Load modules
-include("../src/main.jl")
-include("utils_clean_data.jl")
+include("../../src/main.jl")
+include("../utils/utils_clean_data.jl")
 
 println("\n" * "="^80)
 println("Creating Factor Data")
@@ -51,7 +51,10 @@ println("✓ Data loaded successfully")
 # ============================================================================
 
 println("\n[2/5] Creating factor regressors (market, size, value, etc.)...")
-factor_regressors = Pfs.FactorRegressor(bonds, trace_daily).factor_regressors
+
+include("../../src/main.jl")
+#factor_regressors = Pfs.FactorRegressor(bonds, trace_daily).factor_regressors
+factor_regressors = Pfs.FactorRegressor(bonds).factor_regressors
 factor_regressors = replace_nans(factor_regressors) |> x->dropmissing(x, :market)
 CSV.write("data/output/factor_regressors.csv", factor_regressors)
 println("✓ Factor regressors saved to data/output/factor_regressors.csv")

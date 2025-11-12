@@ -110,10 +110,10 @@ end
 
 Load Fama-French factors from Kenneth French's Library.
 """
-function load_ff(;path="data/")
+function load_ff()
     df = @chain begin
-        DataFrame(read_parquet(path*"wrds/ff_monthly.pq"))
-        @rtransform(:date = Date(:date, DateFormat("yyyy-mm-dd")) )
+        CSV.read("data/wrds/ff_monthly.csv", DataFrame)
+        @rtransform!(:date = Date(:date))
     end
     return df
 end
@@ -180,7 +180,7 @@ Load Bank of America market index.
 """
 function load_BofA_market(;long_term_mkt::Bool=true, path="data/")
     if long_term_mkt == true
-        df = CSV.read(path*"FRED/BAMLCC8A015PYTRIV.csv", DataFrame; missingstring="") |> x->rename(x, :observation_date=>:date, :BAMLCC8A015PYTRIV => :price)
+        df = CSV.read(path*"wrds/BAMLCC8A015PYTRIV.csv", DataFrame; missingstring="") |> x->rename(x, :observation_date=>:date, :BAMLCC8A015PYTRIV => :price)
     else
         df = CSV.read(path*"FRED/BAMLCC0A0CMTRIV.csv", DataFrame; missingstring=".") |> x->rename(x, :observation_date=>:date, :BAMLCC0A0CMTRIV => :price)
         @rtransform!(df, :price = ifelse(:price == "", missing, :price))
@@ -206,7 +206,7 @@ Load long-term government (10-year treasury) return from CRSPA.TFZ_MTH_BP in WRD
 """
 function load_long_term_gov(;path="data/")
     df = @chain begin
-        DataFrame(readsas(path*"FRED/fama_treasury.sas7bdat", exclude_columns=[:KYTREASNOX])) |> x->rename(x, :TMEWRETD=>:ret_eom)
+        DataFrame(readsas(path*"wrds/fama_treasury.sas7bdat", exclude_columns=[:KYTREASNOX])) |> x->rename(x, :TMEWRETD=>:ret_eom)
         dropmissing()
         @subset(.!isnan.(:ret_eom))
         @rtransform(:date = lastdayofmonth(Date(:date)))
@@ -221,8 +221,10 @@ end
 Load VIX index from FRED (https://fred.stlouisfed.org/series/VIXCLS#0).
 """
 function load_vix(;path="data/")
-    vix = CSV.read(path*"FRED/VIXCLS.csv", DataFrame) |> x->rename(x, :observation_date=>:date, :VIXCLS =>:price)
-    vix.date = lastdayofmonth.(vix.date)
+    vix = CSV.read(path*"wrds/VIXCLS.csv", DataFrame) |> x->rename(x, :observation_date=>:date, :VIXCLS =>:price)
+    @transform!(vix, :date = lastdayofmonth.(:date))
+    vix = @combine(groupby(vix, :date), :date=:date[end], :price=:price[end])
+
     vix.price_lag = lag(vix.price, 1)
     vix = dropmissing(vix)
     vix.vix = lm(@formula(price~1+price_lag), vix) |> residuals

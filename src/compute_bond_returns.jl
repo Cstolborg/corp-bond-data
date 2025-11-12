@@ -230,15 +230,9 @@ function add_default_returns(df, defaults; delist_coupacc=false, delist_ret=true
         @rtransform!(df, :ret_eom = ifelse(!ismissing(:post_default) && :post_default, :ret_eom_default, :ret_eom)) 
     end
     if delist_ret == true
-        tmp = @subset(df, :default_ind .==true) |> x->dropmissing(x, [:ret_eom, :ret_eom_lag])
-        @select!(tmp, :cusip, :date, :rating_num, :price_eom, :ret_eom, :ret_eom_lag, :default_ret=((1. .+ :ret_eom_lag) .* (1. .+ :ret_eom) .-1. ))
-        sg_def = @subset(tmp, :rating_num .>=11) |> x-> mean(x.default_ret)  # SG
-        if_def = @subset(tmp, :rating_num .<11) |> x-> mean(dropmissing(x, :default_ret).ret_eom)  # IG
-        all_def = mean(dropmissing(tmp, :default_ret).ret_eom)  # All
-        println("Delisting returns: IG=$(round(if_def, digits=3)) -- SG=$(round(sg_def, digits=3)) -- ALL=$(round(all_def, digits=3))")
-        
+        DEFAULT_RET_IMPUTE = -0.098  # Taken from the paper
         @rtransform!(df, :ret_eom = ifelse(ismissing(:ret_eom) && !ismissing(:default_ind) && :default_ind,  # If missing return and is in default
-                                    all_def,
+                                    DEFAULT_RET_IMPUTE,  
                                     :ret_eom) )   
     end
     return df

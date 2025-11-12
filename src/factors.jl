@@ -328,6 +328,9 @@ function liquidity_amihud_non_traded(df, mkt_val; verbose=false)
     df = sort(df, :eom)
 
     # Extract liquidity factor as the residual in an ARMAX regression
+    println("Estimating Amihud liquidity regression...")
+    println("Number of observations: ", nrow(df))
+    println(first(df, 10))
     df = armax_amihud(df)
     df.amh_liq = df.resid .*(-1.) ./ std(df.resid)
 

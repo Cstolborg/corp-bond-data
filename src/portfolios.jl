@@ -97,7 +97,7 @@ function compute_rolling_signals(df::AbstractDataFrame, factor_regressors::Abstr
     df = sort(df, [level, :date])
     start_date = lastdayofmonth(minimum(df.date)+Month(window-1)) # First day with a signal
 
-    res = DataFrame(:id => Union{Missing, Int, Float64, String, String15}[], :date=>Date[], [name => Union{Missing, Float64}[] for name in names(signal_functions)]...)
+    res = DataFrame(:id => Union{Missing, Int, Float64, String, String15}[], :date=>Date[], [name => Union{Missing, Float64}[] for name in keys(signal_functions)]...)
     @showprogress for (key, sdf) in pairs(groupby(df, level))  # Loop through each cusip
         if nrow(sdf) < min_window  # Skip if too few obs
             continue

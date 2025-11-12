@@ -7,22 +7,24 @@ Manifest.toml
 
 # Data files
 data/
-data/trace/*.sas7bdat
-data/trace/*.csv
 data/wrds/*.sas7bdat
 data/wrds/*.csv
 data/ice_new/*.csv
 data/output/*.csv
 data/output/*.pq
+data/output/update_*/*
 data/data_to_share/*
+data/error_checks/*
 *.parquet
 
 # Keep data directory structure but not data files
 !data/.gitkeep
-!data/trace/.gitkeep
 !data/wrds/.gitkeep
 !data/ice_new/.gitkeep
 !data/output/.gitkeep
+!data/output/update_*/.gitkeep
+!data/data_to_share/.gitkeep
+!data/error_checks/.gitkeep
 
 # Test outputs
 tests/old_output/*

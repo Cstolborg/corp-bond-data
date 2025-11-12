@@ -104,7 +104,7 @@ function check_all_data_files()
     # TRACE intraday data
     println("[1] TRACE Intraday Data")
     all_present &= check_file_exists(
-        "data/trace/trace_prices.sas7bdat",
+        "data/wrds/trace_prices.sas7bdat",
         "TRACE intraday trading data (SAS format)"
     )
     println()
@@ -248,7 +248,7 @@ end
 Print detailed information about the TRACE data file if it exists.
 """
 function check_trace_file_info()
-    trace_file = "data/trace/trace_prices.sas7bdat"
+    trace_file = "data/wrds/trace_prices.sas7bdat"
 
     if !isfile(trace_file)
         println("TRACE file not found: $trace_file")

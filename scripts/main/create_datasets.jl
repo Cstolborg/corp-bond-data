@@ -1,13 +1,19 @@
-# Create datasets used in scientific replication
-# Create different versions of daily trace data specific to various internal replication procedures
+"""
+Usage:
+    julia --project=. scripts/main/create_datasets.jl
+
+"""
+
 using DataFramesMeta, Dates, CSV, Parquet
 using SASLib
 using ShiftedArrays: lag, lead
 using RCall
+using Distributed
 
-include("../src/main.jl")
-include("utils_clean_data.jl")
 
+include("../../src/main.jl")
+include("../utils/utils_clean_data.jl")
+include("../../config/update_config.jl")
 
 R""" 
 library(BondValuation)
@@ -15,23 +21,29 @@ library(R.utils)
 """
 
 
+println("\n" * "="^80)
+println("Creating Bond Data")
+println("="^80)
+println("Time period: $TIMEPERIOD")
+println("Output path: $PATH")
+println("Workers: $N_WORKERS")
+println("="^80 * "\n")
+
+
 # Load packages for parallel processing
-using Distributed
-n_splits = 8
-addprocs(n_splits, exeflags="--project")
+addprocs(N_WORKERS, exeflags="--project")
 @everywhere using DataFramesMeta
 @everywhere using RCall
-@everywhere R""" 
+@everywhere R"""
 library(BondValuation)
 library(R.utils)
 """
-@everywhere include("../src/main.jl")
-
-
+@everywhere include("../../src/main.jl")
 
 #### DATA CREATION BEGINS HERE  ####
 
-@time trace_intraday = DataLoader.load_trace_intraday(;file=file="data/trace/trace_prices.sas7bdat")
+
+@time trace_intraday = DataLoader.load_trace_intraday(;file=file="data/wrds/trace_prices.sas7bdat")
 
 
 # Compute reversal flags
@@ -67,8 +79,6 @@ CSV.write("data/output/trace_monthly.csv", trace_month)
 
 
 ### CREATE RISK MEASURES ###
-include("../src/main.jl")
-
 fisd = Preprocess.Fisd()
 
 begin  # Get data
@@ -85,7 +95,7 @@ end
 
 gdf = groupby(df, :cusip, sort=true)
 #@time tmp, _ = Preprocess.bond_values(gdf[1:50], treasury=false)
-partitions = [gdf[1 + Int(ceil(i*length(gdf)/n_splits)) : Int(ceil((i+1)*length(gdf)/n_splits)) ] for i in 0:n_splits-1]
+partitions = [gdf[1 + Int(ceil(i*length(gdf)/N_WORKERS)) : Int(ceil((i+1)*length(gdf)/N_WORKERS)) ] for i in 0:N_WORKERS-1]
 @time res = pmap(x->Preprocess.bond_values(x, treasury=false), partitions)
 yields = vcat([res[i][1] for i in 1:length(res)]...)
 error_cusips = vcat([res[i][2] for i in 1:length(res)]...)
@@ -100,8 +110,6 @@ CSV.write("data/output/dates_trace.csv", coups)
 ###########################################
 
 ### CREATE MAIN BOND RETURN DATASET ###
-include("../src/main.jl")
-
 trace_month = CSV.read("data/output/trace_monthly.csv", DataFrame)
 rf = DataLoader.load_rf()
 fisd = Preprocess.Fisd()
@@ -136,11 +144,10 @@ CSV.write("data/output/bonds.csv", bonds)
 ##### COMPUTE TREASURY RISK MEASURES  ###################
 
 #bonds = CSV.read("data/output/warga_ice_trace.csv", DataFrame)
-include("../src/main.jl")
 bonds = CSV.read("data/output/bonds.csv", DataFrame)
 
 gdf = groupby(bonds, :cusip, sort=true)
-partitions = [gdf[1 + Int(ceil(i*length(gdf)/n_splits)) : Int(ceil((i+1)*length(gdf)/n_splits)) ] for i in 0:n_splits-1]
+partitions = [gdf[1 + Int(ceil(i*length(gdf)/N_WORKERS)) : Int(ceil((i+1)*length(gdf)/N_WORKERS)) ] for i in 0:N_WORKERS-1]
 #@time res1, _ = Preprocess.bond_values(gdf[1:50], treasury=true)
 @time res1 = pmap(x->Preprocess.bond_values(x, treasury=true), partitions)
 
@@ -157,6 +164,87 @@ transform!(bonds, [:yield, :yield_rf] => ByRow((y, y_rf)-> y-y_rf) => :yield_spr
 bonds = Preprocess.add_treasury_returns(bonds)
 CSV.write("data/output/bonds_full.csv", bonds)
 
+
+
+
+################################################################################
+# ADD VALUE, EQUITY MOMENTUN AND AGGREGATE TO FIRM RETURNS
+##############################################################################
+
+bonds = CSV.read("data/output/bonds_full.csv", DataFrame)
+
+# Factor regressor
+
+factor_regressors = Pfs.FactorRegressor(bonds).factor_regressors
+factor_regressors = replace_nans(factor_regressors) |> x->dropmissing(x, :market)
+CSV.write("data/output/factor_regressors.csv", factor_regressors)
+println("✓ Factor regressors saved to data/output/factor_regressors.csv")
+
+# ============================================================================
+# Add BBW-Factors (VaR and Liquidity Betas)
+# ============================================================================
+
+println("\n[3/5] Computing BBW-style factors (VaR, liquidity betas)...")
+rolling_signal_functions = Dict(
+    :VaR => Factors.VaR,
+    :amh_liq_ret => Factors.liquidity_betas
+)
+rolling_signals = Pfs.compute_rolling_signals(bonds, factor_regressors, rolling_signal_functions; window=36, min_window=24)
+
+df = bonds[:, [:cusip, :date, :ret_exc_lead, :ret_texc_lead, :MV, :rating_num]]
+df = leftjoin(df, rolling_signals, on=[:date, :cusip])
+subset!(df, :rating_num=> ByRow(x-> ismissing(x) || x .<=22.))  # Remove non-missing values with rating above 22 (D)
+transform!(df, :rating_num=>ByRow(x->rating_conversion[round(x)])=>:rating)
+
+signal_names = [:VaR, :amh_liq_ret]
+pfs, factor_returns, factor_returns_double = Pfs.compute_characteristic_pfs(df, signal_names; double_sort=:rating, is_cut=false, N_sorts=3)
+pfs, factor_returns1 = Pfs.compute_characteristic_pfs(df, :rating_num; double_sort=nothing, is_cut=false, N_sorts=3)
+leftjoin!(factor_returns, factor_returns1, on=:date)
+leftjoin!(factor_regressors, factor_returns, on=:date) |> x->sort(x, :date)
+
+rename!(factor_regressors, :VaR=>:VaR_ret, :rating_num=>:rating_ret)
+CSV.write("data/output/factor_regressors_bbw.csv", factor_regressors)
+println("✓ BBW factor regressors saved to data/output/factor_regressors_bbw.csv")
+
+
+# Merge illiquidity onto bonds
+
+illiq = CSV.read("data/output/illiq.csv", DataFrame)
+leftjoin!(bonds, illiq, on=[:cusip, :date=>:eom])
+
+# Merge equity return onto bonds - used for equity mometum
+stocks = CSV.read("data/wrds/stocks.csv", DataFrame) |> dropmissing
+rename!(stocks, :id=>:permno, :eom=>:date)
+@transform!(stocks, :date=Date.(string.(:date), "yyyymmdd"))
+leftjoin!(bonds, stocks, on=[:date, :permno], matchmissing=:equal)
+
+
+# Add Value signals
+transform!(groupby(bonds, :cusip), :duration => lead)
+tmp_ret_vol = Pfs.compute_rolling_signals(bonds, factor_regressors, Dict(:ret_vol=>x->Factors.vol(x, col=:ret_exc)); level=:cusip, window=12, min_window=6)
+leftjoin!(bonds, tmp_ret_vol, on=[:date, :cusip])
+
+transform!(bonds, :yield_spread => ByRow(x-> ismissing(x) || x<0. ? missing : x), renamecols=false)  # Set negative yield spreads to missing
+transform!(bonds, [:yield_spread, :duration, :rating_num, :ret_vol] .=> ByRow(x->log(x)) .=> (x->x*"_log"))
+bonds.value = missings(Float64, nrow(bonds))
+gdf = groupby(bonds, :date)
+transform(gdf) do sdf
+    Factors.value(sdf, y=:yield_spread_log)
+    return sdf
+end
+
+
+numcols = [:price_eom, :ret_eom, :ret_exc, :ret_exc_lead, :ret_texc_lead, :ret_eq, :value, :illiq, :rating_num, :MV, :amount_outstanding, :MV_lag, :MV_lead, :duration, :tmt, :convexity, :bond_age_pct, :bm, :yield_spread, :yield]
+firms = Preprocess.compute_firm_ret(bonds, numcols; firm_id=:permno, duration_adjust=true)
+
+
+# Save final datasets
+CSV.write("data/output/bonds_full.csv", bonds)
+CSV.write("data/output/firms.csv", firms)
+
+# Keep a copy in data/data_to_share
+CSV.write("data/data_to_share/bonds_full.csv", bonds)
+CSV.write("data/data_to_share/firms.csv", firms)
 
 ######################################################################################################
 

@@ -59,7 +59,7 @@ Process Mergent FISD bond issue data.
 Returns DataFrame with bond characteristics.
 """
 function process_fisd()
-    mergent = DataFrame(readsas("data/mergent/fisd_issue.sas7bdat")) |> x -> rename(lowercase, x)
+    mergent = DataFrame(readsas("data/wrds/fisd_issue.sas7bdat")) |> x -> rename(lowercase, x)
     dropmissing!(mergent, [:maturity, :offering_date])
 
     @rselect!(mergent, :cusip=:complete_cusip, :cusip8=:complete_cusip[1:8], :name=:prospectus_issuer_name,
@@ -98,7 +98,7 @@ Get bond default dates from FISD.
 """
 function get_default_dates()
     default = @chain begin
-        DataFrame(readsas("data/mergent/fisd_defaults.sas7bdat")) |> x -> rename(lowercase, x)
+        DataFrame(readsas("data/wrds/fisd_defaults.sas7bdat")) |> x -> rename(lowercase, x)
         sort([:default_date])
         combine(groupby(_, :issue_id)) do sdf  # 96 issues default multiple times - use just the first one
             sdf[1, :]
@@ -115,7 +115,7 @@ Returns DataFrame with time-varying ratings.
 """
 function process_ratings()
     ratings = @chain begin
-        DataFrame(readsas("data/mergent/fisd_ratings.sas7bdat")) |> x -> rename(lowercase, x)
+        DataFrame(readsas("data/wrds/fisd_ratings.sas7bdat")) |> x -> rename(lowercase, x)
         rename!(:rating_date=>:date)
         @rtransform(:cusip=string(:complete_cusip), :rating_type, :rating=string(:rating))
         @rsubset(:rating_type ∈ ["SPR", "MR"])
@@ -157,8 +157,8 @@ end
 Process bond amount outstanding data (offering + historical).
 """
 function process_amount_outstanding(mergent)
-    df = vcat(DataFrame(readsas("data/mergent/fisd_amt_out.sas7bdat")),  # Latest amount outstanding
-        DataFrame(readsas("data/mergent/fisd_amt_out_hist.sas7bdat"))) |> unique |> x->rename(lowercase, x)  # Historical amounts
+    df = vcat(DataFrame(readsas("data/wrds/fisd_amt_out.sas7bdat")),  # Latest amount outstanding
+        DataFrame(readsas("data/wrds/fisd_amt_out_hist.sas7bdat"))) |> unique |> x->rename(lowercase, x)  # Historical amounts
     rename!(df, :complete_cusip => :cusip, :effective_date => :date)
 
     offering_amt = select(mergent, :issue_id, :cusip, :offering_date, :offering_amt) |> x->rename(x, :offering_date=>:date, :offering_amt=>:amount_outstanding)
@@ -595,13 +595,6 @@ function add_treasury_returns(df)
     return df
 end
 
-# ============================================================================
-# BOND RETURNS COMPUTATION
-# ============================================================================
-
-
-
-
 """ Aggregate daily prices into monthly by taking the last observed price in the last 7 days of a given month """
 function agg_daily_trace_to_month(trace_daily;version_="", interpolate=false, liq=false, write_=false)
     version_ in ["", "2016"] ? 0 : error(""" version_ must either be an empty string "" for the full dataset or be equal to "2016" """)
@@ -643,4 +636,50 @@ function agg_daily_trace_to_month(trace_daily;version_="", interpolate=false, li
 
     println("Number of monthly prices in millions: $(nrow(trace_month) / 1e6)")
     return trace_month
+end
+
+# ============================================================================
+# FIRM RETURNS COMPUTATION
+# ============================================================================
+
+""" Function to both impute missing returns and scale existing returns based on firm value-weighted duration and value-weighted returns
+    This has the property that when value-weigthing firm returns, they are unadjusted if there are no missing values and imputed if there are missing values
+"""
+function duration_adjust_ret(df)
+    df = copy(df)  # So the function is not done inplace
+    #df = calendar_fill(df, date_col=:date, level=:cusip)
+    #df = add_permno(df[:, Not([:permno, :permco])])  # add Permno again here because calendar fill creates missing vals. 
+
+    transform!(df, [:ret_exc_lead, :MV] => ByRow((r, m)->!ismissing(r)*m)=>:MV_nonmissing)
+    transform!(groupby(df, [:date, :permno]),[[col, :MV_nonmissing] => ((x,w)->mean_vw(x,w))=>string(col)*"_vw" for col in [:ret_exc_lead, :duration]])
+    #transform!(df, [:duration, :duration_vw, :ret_exc_lead_vw] => ByRow((d, d_vw, r_vw) -> d * r_vw/d_vw)=>:ret_exc_lead)
+    @rtransform!(df, :ret_exc_lead=ifelse(ismissing(:ret_exc_lead), :ret_exc_lead_vw * :duration/:duration_vw, :ret_exc_lead))
+    transform!(groupby(df, [:cusip]), :ret_exc_lead=>lag=>:ret_exc)
+    transform!(df, [:ret_exc, :rf]=>ByRow((r, rf)->r+rf)=>:ret_eom)  # Add back rf to get regular returns
+    df = replace_nans(df)
+    #select!(df, Not([:MV_nonmissing, :ret_exc_lead_vw, :duration_vw]))
+
+    dropmissing!(df, :price_eom)
+    return df
+end
+
+function compute_firm_ret(df, numcols; firm_id=:permno, duration_adjust=true)
+    if duration_adjust == true
+        df = duration_adjust_ret(df)
+    end
+    df = select(df, :date, :cusip, :permno, numcols)
+    #transform!(df, [:ret_exc_lead, :MV] => ByRow((r, m)->!ismissing(r)*m)=>:MV_nonmissing)
+    to_sum = [:MV, :amount_outstanding, :MV_lag]
+    to_lag_mv = [:ret_eom, :ret_exc]
+
+    firms = combine(groupby(df, [:date, firm_id]),
+                    [col=>(x->sum(skipmissing(x)))=>col for col in to_sum],
+                    [[col, :MV_lag] => ((x,w)->mean_vw(x,w))=>col for col in numcols if col∈to_lag_mv],
+                    [[col, :MV] => ((x,w)->mean_vw(x,w))=>col for col in numcols if (col∉to_sum) && (col∉to_lag_mv)],
+                    #:MV=>(x->sum(skipmissing(x)))=>:MV_sum,
+                    :MV=>length=>:nbonds)
+    firms = replace_nans_zero(firms)
+    transform!(firms, :rating_num=>ByRow(x->ceil(x - 0.00005))=>:rating_num)
+    dropmissing!(firms, firm_id)
+    return firms
 end
