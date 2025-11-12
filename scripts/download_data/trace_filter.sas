@@ -542,10 +542,10 @@ QUIT;
 
 
 PROC SQL;
-CREATE TABLE mylib.trace_prices_2024 AS
+CREATE TABLE mylib.trace_prices_2024_2025 AS
 SELECT * 
 FROM mylib.trace_prices 
-WHERE  trd_exctn_dt>'01Jan2024'd;
+WHERE  trd_exctn_dt>'01Jan2024'd AND trd_exctn_dt<='31Dec2025'd;
 RUN;
 QUIT;
 
