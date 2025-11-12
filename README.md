@@ -1,48 +1,35 @@
-# Corporate Bond Data Pipeline
+# Corporate Bond Factors: Replication and Data Pipeline
 
-A Julia-based pipeline for processing corporate bond market data from TRACE, FISD, and ICE sources, transforming raw trading data into analysis-ready datasets with computed risk measures, returns, and factor signals.
+This repository contains the data processing pipeline and analysis code for the research paper:
 
-## Table of Contents
+**"Corporate Bond Factors: Replication Failures and a New Framework"**
+Available at: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652
 
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Data Download](#data-download)
-- [Pipeline Execution Order](#pipeline-execution-order)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Documentation](#documentation)
+## Overview
+
+This project provides a comprehensive Julia-based pipeline for processing U.S. corporate bond market data from TRACE (2002-2024), transforming raw trading records into analysis-ready datasets with computed risk measures, returns, and factor signals.
+
+**If you use this code or data in your research, please cite our paper.**
+
+## Key Features
+
+- **Complete Data Pipeline**: Processes TRACE intraday data → daily prices → monthly returns → risk measures → factor portfolios
+- **Rigorous Bond Valuation**: Uses R's BondValuation package for yield and duration calculations
+- **Quality Controls**: Automated outlier detection, manual review workflow for extreme returns
+- **Factor Construction**: Market, size, value, credit risk, VaR, and liquidity factors
+- **Firm-Level Aggregation**: Duration-weighted aggregation from bond-level to firm-level
+- **Transparent & Reproducible**: Open source code with detailed documentation
 
 ## Quick Start
 
-**Prerequisites:** Julia 1.10+, R 4.0+ with BondValuation, WRDS account
+### Prerequisites
 
-```bash
-# 1. Install dependencies
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+- **Julia 1.10+** - Main pipeline language
+- **R 4.0+** with BondValuation package - Bond yield/duration calculations
+- **WRDS Account** - Required for TRACE and FISD data access
+- **Hardware**: 8+ GB RAM, SSD recommended
 
-# 2. Download data via SAS (see Data Download section)
-
-# 3. Run main pipeline
-julia --project=. scripts/main/check_data_files.jl
-julia --project=. scripts/main/create_datasets.jl       # 5-9 hours
-julia --project=. scripts/main/create_factor_data.jl    # 30-60 min
-```
-
-**For incremental updates**, see [Update Pipeline](#update-pipeline-incremental-data).
-
-## Installation
-
-### 1. Prerequisites
-
-| Software | Version | Purpose |
-|----------|---------|---------|
-| **Julia** | 1.10+ | Main pipeline language |
-| **R** | 4.0+ | Bond valuation (BondValuation package) |
-| **Python** | 3.8+ (optional) | WRDS data downloads |
-| **WRDS Account** | - | Required for TRACE/FISD downloads |
-| **SAS Studio** | - | Initial data extraction from WRDS |
-
-### 2. Julia Setup
+### Installation
 
 ```bash
 # Clone repository
@@ -56,375 +43,289 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. -e 'using RCall; R"library(BondValuation)"'
 ```
 
-**If RCall cannot find R:**
-```julia
-# Set R_HOME and rebuild RCall
-julia --project=. -e 'ENV["R_HOME"] = "C:/Program Files/R/R-4.4.3"; using Pkg; Pkg.build("RCall")'
-```
+### Basic Usage
 
-### 3. R Setup
-
-Install required R packages:
-```r
-install.packages("BondValuation")
-install.packages("R.utils")
-```
-
-### 4. Python Setup (Optional)
-
-For WRDS downloads using Python:
 ```bash
-pip install pandas numpy wrds
+# 1. Download data from WRDS (see Data Download section)
+
+# 2. Verify data files
+julia --project=. scripts/main/check_data_files.jl
+
+# 3. Run main pipeline (5-9 hours)
+julia --project=. scripts/main/create_datasets.jl
+
+# Output: data/output/bonds_full.csv and data/output/firms.csv
 ```
 
-## Data Download
+## Data Sources
 
-### Step 1: Download Data from WRDS
+This pipeline integrates data from multiple sources:
 
-**IMPORTANT:** This must be done FIRST before running any Julia scripts.
+| Source | Description | Access |
+|--------|-------------|--------|
+| **TRACE** | U.S. corporate bond intraday transactions (2002-2024) | WRDS/FINRA |
+| **FISD** | Mergent Fixed Income Securities Database (bond characteristics) | WRDS |
+| **CRSP** | Bond-equity linking tables (CUSIP to PERMNO) | WRDS |
+| **Fama-French** | Daily equity factor returns and risk-free rates | WRDS/Kenneth French Library |
+| **GSW** | Treasury yield curve parameters | Federal Reserve (auto-downloaded) |
 
-The `scripts/download_data/` directory contains programs to download raw data from WRDS:
+### Data Download Instructions
 
-**SAS scripts (run in WRDS SAS Studio):**
+**Step 1: Run SAS scripts on WRDS SAS Studio**
+
+The `scripts/download_data/` directory contains SAS programs to extract data:
+
 1. Navigate to WRDS SAS Studio (wrds-www.wharton.upenn.edu)
-2. Upload and run the SAS files from `scripts/download_data/`:
-   - `trace_filter.sas` - Extract TRACE intraday data → `trace_prices.sas7bdat` (500MB-2GB)
-   - `get_fisd.sas` - Extract FISD bond characteristics, ratings, amounts outstanding
-   - `stocks.sas` - Extract bond-equity linking tables
-3. Download the `.sas7bdat` output files to your local machine
+2. Upload and run these scripts:
+   - `trace_filter.sas` → `trace_prices.sas7bdat` (500MB-2GB)
+   - `get_fisd.sas` → 5 FISD files (characteristics, ratings, defaults, amounts)
+   - `stocks.sas` → `bondcrsp_link.sas7bdat` and `stocks.csv`
+3. Download output files to your local machine
 
-**Python script (optional, for additional WRDS data):**
-```bash
-python scripts/download_data/wrds_get_bond_rets.py
-```
+**Step 2: Organize files**
 
-### Step 2: Organize Downloaded Data
-
-Place ALL downloaded files in `data/wrds/`:
+Place ALL downloaded `.sas7bdat` and `.csv` files in `data/wrds/`:
 
 ```
 data/
-├── wrds/                            # ALL WRDS data files go here
-│   ├── trace_prices.sas7bdat       # TRACE intraday (from SAS Studio)
-│   ├── fisd_issue.sas7bdat         # FISD bond issues (from SAS Studio)
-│   ├── fisd_ratings.sas7bdat       # FISD ratings (from SAS Studio)
-│   ├── fisd_defaults.sas7bdat      # FISD defaults (from SAS Studio)
-│   ├── fisd_amt_out.sas7bdat       # FISD amounts outstanding (from SAS Studio)
-│   ├── fisd_amt_out_hist.sas7bdat  # FISD amounts historical (from SAS Studio)
-│   ├── bondcrsp_link.sas7bdat      # Bond-equity links (from SAS Studio)
-│   └── ff_daily.csv                # Fama-French factors (WRDS web download)
+├── wrds/                          # All WRDS data files
+│   ├── trace_prices.sas7bdat     # TRACE intraday
+│   ├── fisd_issue.sas7bdat       # Bond characteristics
+│   ├── fisd_ratings.sas7bdat     # Credit ratings
+│   ├── fisd_defaults.sas7bdat    # Default dates
+│   ├── fisd_amt_out.sas7bdat     # Amount outstanding
+│   ├── fisd_amt_out_hist.sas7bdat # Amount outstanding (historical)
+│   ├── bondcrsp_link.sas7bdat    # Bond-equity links
+│   ├── stocks.csv                 # Equity returns
+│   └── ff_daily.csv              # Fama-French factors
 │
-└── BondEqLink.csv                   # Additional bond-equity link (provided separately)
+└── BondEqLink.csv                 # Additional links (provided separately)
 ```
 
-### Step 3: Verify Data Files
+**Step 3: Verify**
 
 ```bash
 julia --project=. scripts/main/check_data_files.jl
 ```
 
-This script will:
-- ✅ Verify all required files are present
-- ✅ Auto-download GSW treasury curve from Federal Reserve
-- ❌ Report any missing files
+**See [docs/DATA_REQUIREMENTS.md](docs/DATA_REQUIREMENTS.md) for detailed instructions.**
 
-**Auto-downloaded files:**
-- `data/output/gsw.csv` - GSW treasury yield curve parameters (Federal Reserve)
+## Pipeline Overview
 
-### Required vs Optional Files
+### Main Pipeline (Historical Data)
 
-**Required (must have):**
-- `data/wrds/trace_prices.sas7bdat` - TRACE intraday data
-- `data/wrds/fisd_issue.sas7bdat` - FISD bond characteristics
-- `data/wrds/fisd_ratings.sas7bdat` - FISD ratings
-- `data/wrds/fisd_defaults.sas7bdat` - FISD defaults
-- `data/wrds/fisd_amt_out.sas7bdat` - FISD amounts outstanding
-- `data/wrds/fisd_amt_out_hist.sas7bdat` - FISD amounts historical
-- `data/wrds/bondcrsp_link.sas7bdat` - Bond-equity links
-- `data/wrds/ff_daily.csv` - Fama-French factors
-- `data/BondEqLink.csv` - Additional bond-equity mapping
-
-**Optional:**
-- `data/ice_new/ICE_GI00.csv` - ICE bond data (for ICE pipeline)
-- Warga data - Historical/out-of-sample analysis
-
-**See [docs/DATA_REQUIREMENTS.md](docs/DATA_REQUIREMENTS.md) for detailed download instructions.**
-
-## Pipeline Execution Order
-
-### Main Pipeline (Historical Data - First Time Setup)
-
-Run these scripts **in order** after downloading data:
+Process the complete historical dataset (2002-2024):
 
 ```bash
-# STEP 0: Verify data files exist and download GSW
+# Verify data files (1 min)
 julia --project=. scripts/main/check_data_files.jl
-# ⏱️ Runtime: 1 minute
-# ✅ Outputs: data/output/gsw.csv
 
-# STEP 1: Process historical TRACE data
+# Process TRACE and compute bond risk measures (5-9 hours)
 julia --project=. scripts/main/create_datasets.jl
-# ⏱️ Runtime: 5-9 hours (bond valuation is slow)
-# ✅ Outputs:
-#    - data/output/trace_daily.pq (daily prices)
-#    - data/output/bonds_full.csv (main dataset, incomplete)
-#    - data/output/illiq.csv (liquidity measures)
-#    - data/output/risk_measures_trace.csv
-#    - data/output/date_vectors_trace.csv
 
-# STEP 2: Create factor returns and finalize dataset
-julia --project=. scripts/main/create_factor_data.jl
-# ⏱️ Runtime: 30-60 minutes
-# ✅ Outputs:
-#    - data/output/factor_regressors.csv (factor data)
-#    - data/output/factor_regressors_bbw.csv (BBW factors)
-#    - data/output/bonds_full.csv (UPDATED with signals & equity links)
+# Outputs:
+# - data/output/bonds_full.csv      # Bond-level dataset
+# - data/output/firms.csv            # Firm-level aggregated returns
+# - data/data_to_share/bonds_subset.csv  # Subset for sharing
+# - data/data_to_share/firms_subset.csv  # Firm subset for sharing
 ```
 
-**Total runtime:** ~6-10 hours (mostly bond valuation)
+**Runtime:** 5-9 hours (bond valuation via R is the main bottleneck)
 
 ### Update Pipeline (Incremental Data)
 
-When you have new TRACE data (e.g., 2024-2025) to add to your existing dataset:
+When new TRACE data becomes available:
 
 ```bash
-# STEP 0: Configure the update
-# Edit config/update_config.jl:
-#   UPDATE_DATE = "2025_11_11"       # Today's date
-#   TIMEPERIOD = "_2024_2025"        # Suffix of your new TRACE file
+# 1. Configure (edit config/update_config.jl with date range)
 
-# STEP 1: Process new incremental data
-julia --project=. scripts/update/update_bond_data.jl
-# ⏱️ Runtime: 2-4 hours
-# ✅ Outputs: All files in data/output/update_2025_11_11/
-
-# STEP 2: Check for extreme returns (data quality)
+# 2. Check for data quality issues (5-10 min)
 julia --project=. scripts/update/check_for_errors.jl
-# ⏱️ Runtime: 5-10 minutes
-# ✅ Outputs: Excel files in data/output/update_2025_11_11/excel_files/
-#            (one Excel file per bond with extreme returns)
 
-# STEP 3: MANUAL REVIEW (your task)
-# Open Excel files and review extreme bond returns
-# Mark any confirmed data errors in spreadsheet
-# Optional: Create error exclusion file
+# 3. Manually review Excel files in data/error_checks/
 
-# STEP 4: Merge new data with historical dataset
+# 4. Apply corrections (if needed, 5-10 min)
 julia --project=. scripts/update/merge_datasets.jl
-# ⏱️ Runtime: 5-10 minutes
-# ✅ Outputs: OVERWRITES main files in data/output/
-#    - data/output/trace_daily.pq
-#    - data/output/bonds_full.csv
-#    - data/output/illiq.csv
-
-# STEP 5: Regenerate factors on updated dataset
-julia --project=. scripts/main/create_factor_data.jl
-# ⏱️ Runtime: 30-60 minutes
-# ✅ Outputs: Updated factor files
 ```
 
-**Total runtime:** ~3-5 hours + manual review time
+## Output Datasets
+
+### Bond-Level Dataset: `data/output/bonds_full.csv`
+
+One row per bond-month observation (~2M+ rows):
+
+| Column | Description |
+|--------|-------------|
+| `cusip` | 9-character bond identifier |
+| `permno` | CRSP permanent number (equity link) |
+| `date` | End-of-month date |
+| `name` | Issuer name |
+| `price_eom` | End-of-month clean price |
+| `ret_eom` | Return with accrued interest |
+| `ret_exc` | Excess return over risk-free rate |
+| `ret_texc_lead` | Treasury-adjusted excess return (credit premium) |
+| `yield` | Yield to maturity |
+| `yield_spread` | Yield spread over risk-free rate |
+| `duration` | Modified duration |
+| `tmt` | Time to maturity (years) |
+| `rating_group` | Letter rating (AAA, AA, A, BBB, BB, B, CCC, CC, C, D) |
+| `rating_num` | Numeric rating (1=AAA, 22=D) |
+| `MV` | Market value |
+| `amount_outstanding` | Face value outstanding |
+| `value` | Value signal (yield spread residual) |
+| `bond_age_pct` | Bond age as percentage of life |
+| `ret_eq` | Corresponding equity return |
+
+### Firm-Level Dataset: `data/output/firms.csv`
+
+Duration-weighted aggregation of all bonds per firm (~200K+ rows):
+
+- All bond-level columns, aggregated using duration weights
+- Useful for firm-level credit risk analysis
+
+### Shared Subsets
+
+Simplified datasets for sharing/replication:
+- `data/data_to_share/bonds_subset.csv` - Key bond variables
+- `data/data_to_share/firms_subset.csv` - Key firm variables
 
 ## Project Structure
 
-### Directory Organization
-
 ```
 corp-bond-data/
-├── config/                      # Configuration files
-│   ├── data_paths.jl           # Main pipeline paths & parameters
-│   ├── update_config.jl        # Update pipeline configuration
-│   └── README.md               # Config documentation
+├── config/                      # Configuration
+│   ├── data_paths.jl           # Main pipeline parameters
+│   └── update_config.jl        # Update pipeline configuration
 │
 ├── src/                         # Core Julia modules
 │   ├── main.jl                 # Module loader
 │   ├── data_loader.jl          # TRACE/FISD/WRDS loading
-│   ├── preprocessing.jl        # Bond valuation (R integration)
+│   ├── preprocessing.jl        # Bond valuation via R
 │   ├── compute_bond_returns.jl # Return calculations
 │   ├── factors.jl              # Factor construction
-│   ├── portfolios.jl           # Portfolio sorts
-│   ├── utils.jl                # Utility functions
-│   └── rating_conversions.jl   # Rating mappings (AAA=1, D=22)
+│   └── portfolios.jl           # Portfolio sorts
 │
-├── scripts/                     # Pipeline scripts (organized by function)
-│   ├── download_data/          # Data download scripts (run FIRST)
-│   │   ├── trace_filter.sas   # TRACE data extraction (SAS Studio)
-│   │   ├── get_fisd.sas       # FISD data extraction (SAS Studio)
-│   │   ├── stocks.sas         # Bond-equity links (SAS Studio)
-│   │   └── wrds_get_bond_rets.py  # Optional WRDS downloads (Python)
+├── scripts/                     # Pipeline scripts
+│   ├── download_data/          # SAS/Python data download scripts
 │   ├── main/                   # Main pipeline
-│   │   ├── check_data_files.jl
-│   │   ├── create_datasets.jl
-│   │   ├── create_factor_data.jl
-│   │   └── create_characteristics.jl
 │   ├── update/                 # Update pipeline
-│   │   ├── update_bond_data.jl
-│   │   ├── check_for_errors.jl
-│   │   └── merge_datasets.jl
 │   ├── preprocessing/          # Data preprocessing
-│   │   └── preprocess_new_ice.jl
-│   ├── export/                 # Data export
-│   │   └── data_to_share.jl
-│   ├── utils/                  # Shared utilities
-│   │   └── utils_clean_data.jl
-│   └── README.md              # Scripts documentation
+│   ├── export/                 # Data export utilities
+│   └── utils/                  # Shared utilities
 │
 ├── data/                       # Data directory (user-created)
-│   ├── wrds/                  # ALL WRDS data files (TRACE, FISD, links, FF factors)
+│   ├── wrds/                  # WRDS data files
 │   ├── output/                # Pipeline outputs
-│   │   └── update_YYYY_MM_DD/ # Update pipeline outputs
-│   └── BondEqLink.csv         # Additional bond-equity links
+│   └── data_to_share/         # Shareable datasets
 │
-├── docs/
-│   ├── PIPELINE_WORKFLOW.md   # Detailed workflow guide
-│   └── DATA_REQUIREMENTS.md   # Data download instructions
-│
-├── tests/
-│   └── compare_outputs.jl     # Output validation
-│
-├── CLAUDE.md                   # Developer guide for Claude Code
-├── README.md                   # This file
-└── Project.toml               # Julia dependencies
+└── docs/                       # Documentation
+    ├── PIPELINE_WORKFLOW.md   # Detailed workflow
+    └── DATA_REQUIREMENTS.md   # Data download guide
 ```
 
-### Key Output Files
+## Technical Details
 
-**Main dataset:** `data/output/bonds_full.csv`
-- One row per bond-month observation
-- ~2M+ observations (2002-2024)
-- Key columns:
-  - `cusip` - Bond identifier
-  - `date` - End of month date
-  - `ret_eom` - Bond return with accrued interest
-  - `ret_exc` - Excess return over risk-free rate
-  - `yield`, `duration`, `convexity` - Risk measures
-  - `rating_num` - Numeric rating (1=AAA, 22=D)
-  - `yield_spread` - Yield spread over treasury
-  - `permno` - CRSP stock identifier (for equity link)
+### Bond Valuation
 
-**Other outputs:**
-- `trace_daily.pq` - Daily bond prices (Parquet format, efficient storage)
-- `factor_regressors.csv` - Market, size, value, credit factors
-- `illiq.csv` - Amihud illiquidity measures
+The pipeline uses R's **BondValuation** package to compute:
+- Yield to maturity (YTM)
+- Modified duration
+- Convexity
+- Treasury-equivalent prices and yields
 
-## Configuration
+This ensures accurate pricing and risk measures consistent with bond market conventions.
 
-All pipeline parameters are centralized in `config/`:
+### Data Quality Controls
 
-### Main Pipeline: `config/data_paths.jl`
+1. **Reversal Flag Detection**: Filters outlier prices before daily aggregation
+2. **Extreme Return Detection**: Flags returns exceeding ±32.6% for manual review
+3. **Excel Review Workflow**: Creates detailed workbooks showing intraday/daily data around extreme returns
+4. **Manual Correction**: Supports error exclusion lists for confirmed data errors
 
-Key constants (automatically loaded via `src/main.jl`):
-- `MIN_PRICE_PAIRS = 5` - Minimum prices for illiquidity calculation
-- `MAX_DAYS_BETWEEN_PRICES = 7` - Max gap for liquidity measure
-- `ROLLING_WINDOW_MONTHS = 36` - Rolling window for signals (3 years)
-- `N_PORTFOLIOS = 5` - Number of portfolios for characteristic sorts
-- `VAR_QUANTILE = 0.05` - VaR quantile for BBW factors
+### Parallel Processing
 
-### Update Pipeline: `config/update_config.jl`
+Bond valuation is parallelized using Julia's `Distributed` module:
+- Configurable via `N_WORKERS` in `config/update_config.jl`
+- Optimal: match physical CPU cores (typically 4-8)
+- Each worker loads R's BondValuation independently
 
-**You must edit this file before running the update pipeline:**
+### Factor Construction
 
-```julia
-const UPDATE_DATE = "2025_11_11"      # Date identifier for output directory
-const TIMEPERIOD = "_2024_2025"       # Suffix for new TRACE file
-const N_WORKERS = 8                   # Parallel workers
-const START_YEAR = 2002               # First year of historical data
-const END_YEAR = 2024                 # Last year after merge
-```
+The pipeline implements multiple factor models:
+- **Market Factor**: Value-weighted bond market return
+- **Size Factor**: Small vs. large bonds (by market value)
+- **Value Factor**: High vs. low yield spreads
+- **Credit Factor**: Investment grade vs. high yield
+- **BBW Factors**: VaR and liquidity risk (Bai, Bali & Wen, 2019)
 
-**See [config/README.md](config/README.md) for complete configuration guide.**
-
-## Module Architecture
-
-The pipeline uses a modular architecture defined in `src/main.jl`:
-
-```julia
-include("src/main.jl")  # Loads all modules
-
-# Available modules:
-DataLoader    # Load TRACE, FISD, WRDS, treasury data
-Preprocess    # Bond valuation (R), FISD processing, aggregation
-Factors       # Factor construction, portfolio sorts
-Pfs           # Performance evaluation, factor regressors
-```
-
-**Key functions:**
-- `DataLoader.load_trace_intraday()` - Load TRACE data
-- `Preprocess.bond_values()` - Compute yields/durations via R
-- `Preprocess.agg_daily_trace_to_month()` - Daily → monthly
-- `Factors.create_bond_factors()` - Market, size, value factors
-- `add_permno()` - Link bonds to CRSP equities
-
-## Performance Benchmarks
+## Performance
 
 **Hardware:** 8-core CPU, 16GB RAM, SSD
 
-| Pipeline | Runtime | Bottleneck |
-|----------|---------|------------|
-| Main (full) | 6-9 hours | Bond valuation (R BondValuation) |
-| Factor creation | 30-60 min | Portfolio sorts |
-| Update | 2-4 hours | Bond valuation |
-| Error check | 5-10 min | Excel file generation |
-| Merge | 5-10 min | I/O operations |
+| Task | Runtime | Notes |
+|------|---------|-------|
+| Main pipeline | 5-9 hours | Bond valuation is bottleneck |
+| Error checking | 5-10 min | Excel file generation |
+| Data merging | 5-10 min | I/O operations |
 
 **Optimization tips:**
-- Use Julia 1.10+ (~30% faster than 1.8)
+- Use Julia 1.10+ for best performance
 - SSD storage recommended
-- Adjust `N_WORKERS` in `config/update_config.jl` to match CPU cores
-- Bond valuation via R is the main bottleneck (no easy fix)
+- Adjust `N_WORKERS` to match CPU cores
+
+## Citation
+
+If you use this code or data in your research, please cite:
+
+```
+[Add formatted citation here]
+
+Available at: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652
+```
 
 ## Documentation
 
 | Document | Purpose |
 |----------|---------|
+| [README.md](README.md) | This file - project overview |
 | [CLAUDE.md](CLAUDE.md) | Developer guide for Claude Code |
-| [config/README.md](config/README.md) | Configuration system guide |
-| [scripts/README.md](scripts/README.md) | Scripts reference |
 | [docs/PIPELINE_WORKFLOW.md](docs/PIPELINE_WORKFLOW.md) | Detailed workflow |
 | [docs/DATA_REQUIREMENTS.md](docs/DATA_REQUIREMENTS.md) | Data download instructions |
+| [config/README.md](config/README.md) | Configuration system |
+| [scripts/README.md](scripts/README.md) | Scripts reference |
 
-## Common Issues
+## Troubleshooting
 
-### "Package BondValuation not found"
-**Solution:** Install in R: `install.packages("BondValuation")`
+### Common Issues
 
-### RCall cannot find R
-**Solution:**
+**"Package BondValuation not found"**
+```r
+install.packages("BondValuation")
+install.packages("R.utils")
+```
+
+**RCall cannot find R**
 ```julia
-ENV["R_HOME"] = "C:/Program Files/R/R-4.4.3"  # Adjust to your R installation
+ENV["R_HOME"] = "C:/Program Files/R/R-4.4.3"  # Adjust path
 using Pkg; Pkg.build("RCall")
 ```
 
-### Out of memory errors
-**Solution:** Reduce `N_WORKERS` in `config/update_config.jl` (try 4 instead of 8)
+**Out of memory errors**
+- Reduce `N_WORKERS` in `config/update_config.jl` (try 4 instead of 8)
 
-### "File not found: trace_prices.sas7bdat"
-**Solution:** Run SAS scripts in `scripts/download_data/` first to extract data from WRDS
+**"File not found: trace_prices.sas7bdat"**
+- Run SAS scripts in `scripts/download_data/` on WRDS SAS Studio first
 
-### Extreme returns not flagged
-**Solution:** Check `EXTREME_RETURN_THRESHOLD` in `config/update_config.jl` (default: 0.326 = ±32.6%)
-
-### Missing equity links (permno = missing)
-**Solution:** Verify both files exist in `data/wrds/`:
-- `bondcrsp_link.sas7bdat`
-- `../BondEqLink.csv` (in data/ root)
-
-**See [docs/PIPELINE_WORKFLOW.md#troubleshooting](docs/PIPELINE_WORKFLOW.md#troubleshooting) for complete troubleshooting guide.**
+See [docs/PIPELINE_WORKFLOW.md](docs/PIPELINE_WORKFLOW.md) for complete troubleshooting guide.
 
 ## License
 
-Research use only. Contact authors for commercial use.
+This code is provided for academic research purposes. Please cite our paper if you use this code or data. For commercial use, contact the authors.
 
-## Citation
+## Contact
 
-If using this pipeline, please cite:
+For questions about the code or data, please open an issue on GitHub or contact the authors via the SSRN paper page.
 
-[Add your paper citation here]
+---
 
-## Data Sources
-
-- **TRACE:** Financial Industry Regulatory Authority (FINRA)
-- **FISD:** Mergent Fixed Income Securities Database
-- **WRDS:** Wharton Research Data Services
-- **GSW:** Federal Reserve Board (Gürkaynak-Sack-Wright parameters)
-- **Fama-French Factors:** Kenneth French Data Library
+**Research Paper:** https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652
