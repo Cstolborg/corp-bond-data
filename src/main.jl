@@ -10,9 +10,6 @@ using Statistics, StatsBase
 using Dates
 using ShiftedArrays: lag, lead
 
-# Load configuration
-include("../config/data_paths.jl")
-
 # ============================================================================
 # DataLoader Module
 # ============================================================================
@@ -133,6 +130,4 @@ Modules available:
 - Preprocess: Data preprocessing and bond valuation
 - Factors: Factor computation
 - Pfs: Portfolio construction and analysis
-
-Configuration: See config/data_paths.jl
 """

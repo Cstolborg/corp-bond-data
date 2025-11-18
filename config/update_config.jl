@@ -1,50 +1,37 @@
 """
     update_config.jl
 
-Configuration for the update pipeline scripts:
-- update_bond_data.jl
-- check_for_errors.jl
-- merge_datasets.jl
+Main configuration file for the corporate bond data pipeline.
+
+Used by:
+- scripts/main/create_datasets.jl (main pipeline)
+- scripts/update/check_for_errors.jl (error checking)
 
 USAGE: Simply include this file at the top of each script:
-    include("../config/update_config.jl")
+    include("../../config/update_config.jl")
 
-Then modify the constants below to match your update period.
-All three scripts will automatically use the same configuration.
+Configuration is automatically applied to all scripts.
 """
-
-# ============================================================================
-# UPDATE CONFIGURATION - MODIFY THESE VALUES
-# ============================================================================
-
-const UPDATE_DATE = "2025_11_11"      # Date identifier for output directory
-const TIMEPERIOD = "_2024_2025"       # Suffix for TRACE file (use "" for full period)
 
 # ============================================================================
 # PROCESSING PARAMETERS
 # ============================================================================
 
-const N_WORKERS = 8                   # Parallel workers for bond valuation
+# Auto-detect optimal number of workers (half of CPU cores + 1)
+# You can override this by setting N_WORKERS manually
+const N_WORKERS = let
+    n_cores = Sys.CPU_THREADS
+    max(1, div(n_cores, 2) + 1)  # Half of cores + 1, minimum 1
+end
+
+# ============================================================================
+# ERROR CHECKING CONFIGURATION
+# ============================================================================
+
+const UPDATE_DATE = "2025_11_11"      # Date identifier for Excel output directory
+const LAST_DATE = Date(2023, 12, 31)  # Last date of data to check
 
 # Error detection parameters (for check_for_errors.jl)
 const EXTREME_RETURN_THRESHOLD = 0.326  # 32.6% absolute return threshold
 const N_MONTHS_BACK = 4               # Months of data before extreme return
 const N_MONTHS_FORWARD = 2            # Months of data after extreme return
-
-# Merge parameters (for merge_datasets.jl)
-const START_YEAR = 2002               # First year of historical data
-const END_YEAR = 2024                 # Last year after merge
-const ERROR_FILE = nothing            # Path to confirmed errors (or nothing)
-# Example: ERROR_FILE = "data/output/update_$(UPDATE_DATE)/confirmed_errors.xlsx"
-
-# ============================================================================
-# AUTO-GENERATED PATHS (don't modify)
-# ============================================================================
-
-const PATH = "data/output/update_$(UPDATE_DATE)/"
-const EXCEL_PATH = PATH * "excel_files/"
-const OUTPUT_SUFFIX = "$(START_YEAR)_$(END_YEAR)"
-
-# Create directories if they don't exist
-!isdir(PATH) && mkpath(PATH)
-!isdir(EXCEL_PATH) && mkpath(EXCEL_PATH)

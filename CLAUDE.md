@@ -37,14 +37,12 @@ julia --project=. scripts/main/create_datasets.jl       # 5-9 hours
 julia --project=. scripts/main/create_factor_data.jl    # 30-60 min
 ```
 
-**Update Pipeline** (incremental data):
+**Error Checking Workflow** (after running main pipeline):
 ```bash
-# 1. Edit config/update_config.jl first (set UPDATE_DATE, TIMEPERIOD)
-julia --project=. scripts/update/update_bond_data.jl    # 2-4 hours
 julia --project=. scripts/update/check_for_errors.jl    # 5-10 min
-# 2. Manual review of Excel files
-julia --project=. scripts/update/merge_datasets.jl      # 5-10 min
-julia --project=. scripts/main/create_factor_data.jl    # 30-60 min
+# Manual review of Excel files in data/error_checks/excel_YYYY_MM_DD/
+# Add reviewed errors to data/error_checks/errors.xlsx (columns: cusip, date)
+# Re-run check_for_errors.jl to check for additional errors (reviewed ones excluded)
 ```
 
 **Other utilities:**
@@ -61,8 +59,7 @@ python scripts/download_data/wrds_get_bond_rets.py             # WRDS downloads
 ```
 corp-bond-data/
 ├── config/                      # Configuration
-│   ├── data_paths.jl           # Main pipeline config
-│   └── update_config.jl        # Update pipeline config (EDIT THIS for updates)
+│   └── update_config.jl        # Pipeline config (EDIT THIS for error checking)
 │
 ├── src/                         # Core modules
 │   ├── main.jl                 # Module loader
@@ -85,10 +82,8 @@ corp-bond-data/
 │   │   ├── create_datasets.jl
 │   │   ├── create_factor_data.jl
 │   │   └── create_characteristics.jl
-│   ├── update/                 # Update pipeline
-│   │   ├── update_bond_data.jl
-│   │   ├── check_for_errors.jl
-│   │   └── merge_datasets.jl
+│   ├── update/                 # Error checking
+│   │   └── check_for_errors.jl
 │   ├── preprocessing/          # Data preprocessing
 │   │   └── preprocess_new_ice.jl
 │   ├── export/                 # Data export
@@ -99,8 +94,13 @@ corp-bond-data/
 ├── data/                       # Data directory
 │   ├── wrds/                  # ALL WRDS data (TRACE, FISD, links, FF factors)
 │   ├── output/                # Pipeline outputs
-│   │   └── update_YYYY_MM_DD/ # Update pipeline outputs
+│   ├── error_checks/          # Error checking files
+│   │   ├── errors.xlsx        # Already-reviewed errors (cusip, date)
+│   │   └── excel_YYYY_MM_DD/  # Excel files for manual review
 │   └── BondEqLink.csv         # Additional bond-equity links
+├── tests/                      # Test files
+│   ├── test_bonds_subset.jl   # Test script for bonds_subset.csv
+│   └── bonds_full_test.csv    # Expected output for testing
 │
 └── docs/                       # Documentation
     ├── PIPELINE_WORKFLOW.md
@@ -164,50 +164,37 @@ The codebase uses a modular architecture defined in `src/main.jl`:
 12. **Equity links** → Update PERMNO/PERMCO
 13. **Final dataset** → `bonds_full.csv` (COMPLETE with all features)
 
-**Update Pipeline** (`scripts/update/`) sequence:
+**Error Checking Workflow** (`scripts/update/check_for_errors.jl`) sequence:
 
-1. **Configure** → Edit `config/update_config.jl` (UPDATE_DATE, TIMEPERIOD)
-2. **Process new data** → `update_bond_data.jl` creates incremental dataset
-3. **Error detection** → `check_for_errors.jl` creates Excel files for extreme returns
-4. **Manual review** → User reviews Excel files
-5. **Merge datasets** → `merge_datasets.jl` OVERWRITES main files in `data/output/`
-6. **Regenerate factors** → `create_factor_data.jl` on updated dataset
+1. **Run script** → `check_for_errors.jl` identifies extreme returns across entire dataset
+2. **Exclude reviewed** → Automatically excludes returns already in `data/error_checks/errors.xlsx`
+3. **Generate Excel files** → Creates detailed workbooks for manual review
+4. **Manual review** → User reviews Excel files to classify errors vs. real market events
+5. **Document errors** → Add reviewed (cusip, date) pairs to `errors.xlsx`
+6. **Re-run** → Re-run script to check for additional errors (reviewed ones excluded)
 
 ### Configuration System
 
-**Centralized config files in `config/`:**
+**Main configuration file: `config/update_config.jl`**
 
-1. **`config/data_paths.jl`** - Main pipeline configuration
-   - Loaded automatically by `src/main.jl`
-   - Contains:
-     - Directory paths (TRACE_DIR, WRDS_DIR, OUTPUT_DIR)
-     - Common file paths (BONDCRSP_LINK, FF_DAILY, GSW_FILE)
-     - Pipeline parameters (MIN_PRICE_PAIRS, ROLLING_WINDOW_MONTHS, etc.)
-   - Used by: Main pipeline scripts
+This is the centralized configuration file for the entire pipeline.
 
-2. **`config/update_config.jl`** - Update pipeline configuration
-   - **USER MUST EDIT THIS FILE** before running update pipeline
-   - Contains all constants for update scripts (UPDATE_DATE, TIMEPERIOD, N_WORKERS, etc.)
-   - Used by: `update_bond_data.jl`, `check_for_errors.jl`, `merge_datasets.jl`
-   - Auto-generates: PATH, EXCEL_PATH, OUTPUT_SUFFIX
-   - Benefits: Single source of truth - change config in ONE place, all three scripts use it
+**Used by:**
+- `scripts/main/create_datasets.jl` (main pipeline)
+- `scripts/update/check_for_errors.jl` (error checking)
 
 **Key configuration parameters:**
 
-From `config/data_paths.jl`:
-- `MIN_PRICE_PAIRS = 5` - Minimum price pairs for illiquidity calculation
-- `MAX_DAYS_BETWEEN_PRICES = 7` - Max days between price observations
-- `ROLLING_WINDOW_MONTHS = 36` - Rolling window for signal computation (3 years)
-- `N_PORTFOLIOS = 5` - Number of portfolios for characteristic sorts
-- `VAR_QUANTILE = 0.05` - VaR quantile level
+**Processing parameters:**
+- `N_WORKERS` - **Auto-detected:** Half of CPU cores + 1 (e.g., 16-core system → 9 workers)
+  - You can override by setting manually in `update_config.jl`
+  - Used for parallel bond valuation (most time-intensive step)
 
-From `config/update_config.jl` (user must edit):
-- `UPDATE_DATE = "2025_11_11"` - Date identifier for update directory
-- `TIMEPERIOD = "_2024_2025"` - Suffix for TRACE file
-- `N_WORKERS = 8` - Number of parallel workers
+**Error checking parameters:**
+- `UPDATE_DATE = "2025_11_11"` - Date identifier for Excel output directory
 - `EXTREME_RETURN_THRESHOLD = 0.326` - Error detection threshold (±32.6%)
-- `START_YEAR = 2002` - First year of historical data
-- `END_YEAR = 2024` - Last year after merge
+- `N_MONTHS_BACK = 4` - Months of data before extreme return to show in Excel
+- `N_MONTHS_FORWARD = 2` - Months of data after extreme return to show in Excel
 
 ### Data Directory Structure
 
@@ -298,7 +285,7 @@ end
 
 Usage in pipeline:
 ```julia
-# STEP 2 in update_bond_data.jl (after intraday load, before daily aggregation)
+# STEP 2 in create_datasets.jl (after intraday load, before daily aggregation)
 trace_intraday.keep .= true
 transform!(groupby(trace_intraday, :cusip), compute_reversal_flags!)
 @subset!(trace_intraday, :keep .== true)  # Remove flagged outliers
@@ -422,15 +409,15 @@ All files go in `data/wrds/`:
 | `create_factor_data.jl` | Factor construction | 30-60 min | factor_regressors.csv, bonds_full.csv (complete) |
 | `create_characteristics.jl` | Bond characteristics | Variable | Characteristic portfolios |
 
-### Update Pipeline (`scripts/update/`)
+### Error Checking (`scripts/update/`)
 
 | Script | Purpose | Runtime | Key Outputs |
 |--------|---------|---------|-------------|
-| `update_bond_data.jl` | Process incremental data | 2-4 hrs | All files in update_YYYY_MM_DD/ |
-| `check_for_errors.jl` | Error detection | 5-10 min | Excel files for review |
-| `merge_datasets.jl` | Merge old + new | 5-10 min | Overwrites main files in data/output/ |
+| `check_for_errors.jl` | Error detection across full dataset | 5-10 min | Excel files in error_checks/excel_YYYY_MM_DD/ |
 
-**Configuration:** Edit `config/update_config.jl` before running update pipeline.
+**Configuration:** Edit `config/update_config.jl` to customize error detection parameters.
+
+**Workflow:** Run after `create_datasets.jl` → manually review Excel files → add reviewed errors to `data/error_checks/errors.xlsx` → re-run to check for additional errors.
 
 ### Data Download Scripts (`scripts/download_data/`)
 
@@ -446,6 +433,14 @@ All files go in `data/wrds/`:
 
 - `scripts/preprocessing/preprocess_new_ice.jl` - ICE data preprocessing
 - `scripts/export/data_to_share.jl` - Create shareable datasets
+
+### Testing Scripts (`tests/`)
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `test_bonds_subset.jl` | Test bonds_subset.csv against expected output | `julia --project=. tests/test_bonds_subset.jl` |
+
+**Expected test file:** `tests/bonds_full_test.csv` - Reference dataset for validation
 
 ## Performance Notes
 

@@ -25,9 +25,10 @@ This project provides a comprehensive Julia-based pipeline for processing U.S. c
 ### Prerequisites
 
 - **Julia 1.10+** - Main pipeline language
+- **Python 3.9+** with pandas, pyarrow and fastparquet
 - **R 4.0+** with BondValuation package - Bond yield/duration calculations
 - **WRDS Account** - Required for TRACE and FISD data access
-- **Hardware**: 8+ GB RAM, SSD recommended
+- **Hardware**: 32+ GB RAM, SSD recommended
 
 ### Installation
 
@@ -132,21 +133,27 @@ julia --project=. scripts/main/create_datasets.jl
 
 **Runtime:** 5-9 hours (bond valuation via R is the main bottleneck)
 
-### Update Pipeline (Incremental Data)
+### Error Checking Workflow
 
-When new TRACE data becomes available:
+After running the main pipeline, check for extreme returns and data quality issues:
 
 ```bash
-# 1. Configure (edit config/update_config.jl with date range)
-
-# 2. Check for data quality issues (5-10 min)
+# 1. Check for extreme returns (5-10 min)
 julia --project=. scripts/update/check_for_errors.jl
 
-# 3. Manually review Excel files in data/error_checks/
+# 2. Manually review Excel files in data/error_checks/excel_YYYY_MM_DD/
+#    - Check flagged returns (marked_obs_ind = TRUE)
+#    - Verify if pricing errors or real market events
 
-# 4. Apply corrections (if needed, 5-10 min)
-julia --project=. scripts/update/merge_datasets.jl
+# 3. Add reviewed errors to data/error_checks/errors.xlsx
+#    - Format: Excel file with columns 'cusip' and 'date'
+#    - Already-reviewed returns will be excluded on next run
+
+# 4. Re-run check_for_errors.jl to check for additional issues
+#    (reviewed returns are automatically excluded)
 ```
+
+**Note:** The script checks the entire dataset but excludes returns already documented in `errors.xlsx`.
 
 ## Output Datasets
 
@@ -194,8 +201,7 @@ Simplified datasets for sharing/replication:
 ```
 corp-bond-data/
 ├── config/                      # Configuration
-│   ├── data_paths.jl           # Main pipeline parameters
-│   └── update_config.jl        # Update pipeline configuration
+│   └── update_config.jl        # Main configuration file (N_WORKERS, error checking)
 │
 ├── src/                         # Core Julia modules
 │   ├── main.jl                 # Module loader
@@ -245,8 +251,9 @@ This ensures accurate pricing and risk measures consistent with bond market conv
 ### Parallel Processing
 
 Bond valuation is parallelized using Julia's `Distributed` module:
-- Configurable via `N_WORKERS` in `config/update_config.jl`
-- Optimal: match physical CPU cores (typically 4-8)
+- **Auto-configured:** `N_WORKERS` automatically set to half of CPU cores + 1
+  - Example: 16-core system → 9 workers
+  - Override in `config/update_config.jl` if needed
 - Each worker loads R's BondValuation independently
 
 ### Factor Construction

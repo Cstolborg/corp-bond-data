@@ -1,31 +1,42 @@
 """
     check_for_errors.jl
 
-Detect extreme bond returns and create Excel files for manual review.
+Detect extreme bond returns in the full dataset and create Excel files for manual review.
 
-This script identifies bonds with extreme returns (absolute value >= 32.6%) and
-creates detailed Excel workbooks showing intraday and daily pricing data for
-manual error classification.
+This script identifies bonds with extreme returns (absolute value >= threshold) across
+the entire dataset, excluding returns that have already been manually reviewed.
+
+Workflow:
+    1. Run create_datasets.jl (processes full updated TRACE file)
+    2. Run this script to check for extreme returns
+    3. Manually review Excel files and add reviewed errors to data/error_checks/errors.xlsx
+    4. Re-run this script to check for additional errors (already-reviewed returns are excluded)
 
 Usage:
-    julia --project=. scripts/check_for_errors.jl
+    julia --project=. scripts/main/check_for_errors.jl
 
 Configuration:
-    Edit UPDATE_DATE below to match the update directory you want to check
+    Edit config/update_config.jl to set:
+    - EXTREME_RETURN_THRESHOLD: Return threshold (default 0.326 = ±32.6%)
+    - N_MONTHS_BACK, N_MONTHS_FORWARD: Data window for Excel files
 
-Input files (from update_bond_data.jl):
-    - data/output/update_YYYY_MM_DD/bonds.csv
-    - data/output/update_YYYY_MM_DD/trace_daily_PERIOD.pq
-    - data/wrds/trace_prices_PERIOD.sas7bdat (intraday data)
+Input files:
+    - data/output/bonds_full.csv (from create_datasets.jl)
+    - data/output/trace_daily.pq (from create_datasets.jl)
+    - data/wrds/trace_prices.sas7bdat (intraday data)
+    - data/error_checks/errors.xlsx (already-reviewed errors, optional)
 
 Output:
-    - Excel files in data/output/update_YYYY_MM_DD/excel_files/
-    - One .xlsx file per bond with extreme returns
+    - Excel files in data/error_checks/excel_YYYY_MM_DD/
+    - One .xlsx file per bond with extreme returns (not yet reviewed)
     - Each file contains 4 sheets: intraday/daily data for the bond and its issuer
+    - bond_returns_to_check.csv: List of all extreme returns
 
 Next step:
-    1. Manually review Excel files and mark errors
-    2. Run merge_datasets.jl to combine clean data
+    1. Manually review Excel files
+    2. Add reviewed errors to data/error_checks/errors.xlsx in "TRACE_error" sheet
+       Format: Columns 'cusip', 'trade_date' (any row in sheet is considered a reviewed error)
+    3. Re-run this script to check for additional errors
 """
 
 using DataFramesMeta, Dates, CSV, Parquet
@@ -33,75 +44,140 @@ using SASLib
 using XLSX
 
 include("../../src/main.jl")
-include("../utils/utils_clean_data.jl")
+include("utils_clean_data.jl")
 include("../../config/update_config.jl")
 
+# Set up error checking directory
+ERROR_CHECK_DIR = "data/error_checks/excel_$(UPDATE_DATE)/"
+!isdir(ERROR_CHECK_DIR) && mkpath(ERROR_CHECK_DIR)
+
+# Path to errors file
+ERRORS_FILE = "data/error_checks/errors.xlsx"
+
 println("\n" * "="^80)
-println("Checking for Extreme Bond Returns")
+println("Checking for Extreme Bond Returns in Full Dataset")
 println("="^80)
-println("Update path: $PATH")
 println("Threshold: ±$(EXTREME_RETURN_THRESHOLD*100)%")
-println("Excel output: $EXCEL_PATH")
+println("Excel output: $ERROR_CHECK_DIR")
+println("Already-reviewed errors file: $ERRORS_FILE")
 println("="^80 * "\n")
 
 # ============================================================================
 # STEP 1: LOAD DATA
 # ============================================================================
 
-println("[1/5] Loading bond return data...")
-bonds = CSV.read(PATH*"bonds_full.csv", DataFrame)
+println("[1/6] Loading bond return data...")
+bonds = CSV.read("data/output/bonds_full.csv", DataFrame)
 
-# Get date range for filtering
-date_range = extrema(bonds.date)
-println("✓ Loaded bond data: $(date_range[1]) to $(date_range[2])")
+println("✓ Loaded bond data")
+println("  Date range: $(extrema(bonds.date)[1]) to $(extrema(bonds.date)[2])")
+println("  Total observations: $(nrow(bonds))")
 
 # ============================================================================
-# STEP 2: IDENTIFY EXTREME RETURNS
+# STEP 2: LOAD ALREADY-REVIEWED ERRORS
 # ============================================================================
 
-println("\n[2/5] Identifying extreme returns...")
+println("\n[2/6] Loading already-reviewed errors...")
 
-# Compute simple returns for comparison
-@transform!(groupby(bonds, :cusip), :ret_simple=:price_eom ./ :price_eom_lag .- 1.)
+if isfile(ERRORS_FILE)
+    # Read errors.xlsx - expects sheet "TRACE_error" with columns: cusip, trade_date
+    try
+        # Read TRACE_error sheet
+        df_trace = DataFrame(XLSX.readtable(ERRORS_FILE, "TRACE_error"))
 
-# Flag extreme returns (both ret_eom and ret_simple)
-bonds_extreme = @subset(bonds,
-    :date .>= date_range[1],
-    (abs.(:ret_eom) .>= EXTREME_RETURN_THRESHOLD))
+        # Check for required columns (cusip and trade_date)
+        if !("cusip" in names(df_trace)) || !("trade_date" in names(df_trace))
+            error("TRACE_error sheet must contain columns: cusip, trade_date")
+        end
 
-bonds_extreme_simple = @subset(bonds,
-    :date .>= date_range[1],
-    (abs.(:ret_simple) .>= EXTREME_RETURN_THRESHOLD))
+        # Select and process - any row in the sheet is considered a reviewed error
+        errors_df = select(df_trace, :cusip, :trade_date)
+        dropmissing!(errors_df, [:cusip, :trade_date])
+        transform!(errors_df, :trade_date => (x -> lastdayofmonth.(x)) => :date)
+        unique!(errors_df)
 
-bonds_extreme = vcat(bonds_extreme, bonds_extreme_simple) |>
-    x->unique(x, [:cusip, :date]) |>
-    x->sort(x, [:cusip, :date])
+        println("✓ Loaded $(nrow(errors_df)) already-reviewed errors from TRACE_error sheet")
+        if nrow(errors_df) > 0
+            println("  Date range: $(extrema(errors_df.date)[1]) to $(extrema(errors_df.date)[2])")
+            println("  Unique bonds: $(length(unique(errors_df.cusip)))")
+        end
+    catch e
+        @warn "Could not read errors.xlsx TRACE_error sheet: $e"
+        @warn "Proceeding without exclusions"
+        errors_df = DataFrame(cusip=String[], date=Date[])
+    end
+else
+    println("✓ No errors.xlsx found - checking all extreme returns")
+    errors_df = DataFrame(cusip=String[], date=Date[])
+end
 
-println("✓ Found $(nrow(bonds_extreme)) extreme return observations")
+# ============================================================================
+# STEP 3: IDENTIFY EXTREME RETURNS
+# ============================================================================
+
+println("\n[3/6] Identifying extreme returns in full dataset...")
+
+# Flag extreme returns using ret_eom only
+bonds_extreme = @subset(bonds, abs.(:ret_eom) .>= EXTREME_RETURN_THRESHOLD)
+sort!(bonds_extreme, [:cusip, :date])
+
+println("✓ Found $(nrow(bonds_extreme)) extreme return observations in full dataset")
 println("  Unique bonds: $(length(unique(bonds_extreme.cusip)))")
 
+# ============================================================================
+# STEP 4: EXCLUDE ALREADY-REVIEWED ERRORS
+# ============================================================================
+
+println("\n[4/6] Excluding already-reviewed errors...")
+
+n_before = nrow(bonds_extreme)
+
+if nrow(errors_df) > 0
+    # Anti-join to exclude already-reviewed errors
+    bonds_extreme = antijoin(bonds_extreme, errors_df, on=[:cusip, :date])
+end
+
+n_after = nrow(bonds_extreme)
+n_excluded = n_before - n_after
+
+println("✓ Excluded $n_excluded already-reviewed errors")
+println("  Remaining extreme returns to review: $n_after")
+println("  Unique bonds to review: $(length(unique(bonds_extreme.cusip)))")
+
+if nrow(bonds_extreme) == 0
+    println("\n" * "="^80)
+    println("✓ No new extreme returns to review!")
+    println("="^80)
+    println("\nAll extreme returns have been reviewed.")
+    println("Re-run create_datasets.jl if you have updated the data.")
+    println()
+    exit(0)
+end
+
 # Export extreme returns for review
-CSV.write(PATH*"bond_returns_to_check.csv", bonds_extreme)
-println("✓ Saved extreme returns to: $(PATH)bond_returns_to_check.csv")
+CSV.write(ERROR_CHECK_DIR*"bond_returns_to_check.csv", bonds_extreme)
+println("✓ Saved extreme returns to: $(ERROR_CHECK_DIR)bond_returns_to_check.csv")
 
 # ============================================================================
-# STEP 3: LOAD INTRADAY AND DAILY TRACE DATA
+# STEP 5: LOAD INTRADAY AND DAILY TRACE DATA
 # ============================================================================
 
-println("\n[3/5] Loading TRACE data for flagged bonds...")
+println("\n[5/6] Loading TRACE data for flagged bonds...")
 
 cusips = unique(bonds_extreme, [:cusip])[!, [:cusip]]
 
-# Load intraday data
-trace_intraday = DataLoader.load_trace_intraday(file="data/wrds/trace_prices"*TIMEPERIOD*".sas7bdat")
+# Load intraday data for flagged CUSIPs only
+println("  Loading intraday TRACE data...")
+trace_intraday = DataLoader.load_trace_intraday(file="data/wrds/trace_prices.sas7bdat")
 trace_intraday = innerjoin(trace_intraday, cusips, on=:cusip)
-CSV.write(PATH*"trace_intraday_to_check.csv", trace_intraday)
+CSV.write(ERROR_CHECK_DIR*"trace_intraday_to_check.csv", trace_intraday)
 println("✓ Loaded intraday data: $(nrow(trace_intraday)) trades")
 
-# Load daily data
-trace_daily = DataFrame(read_parquet(PATH*"trace_daily"*TIMEPERIOD*".pq")) |> year_month_day_to_date!
+# Load daily data for flagged CUSIPs only
+println("  Loading daily TRACE data...")
+trace_daily = DataFrame(read_parquet("data/output/trace_daily.pq")) |> year_month_day_to_date!
 trace_daily = innerjoin(trace_daily, cusips, on=:cusip)
-CSV.write(PATH*"trace_daily_to_check.csv", trace_daily)
+CSV.write(ERROR_CHECK_DIR*"trace_daily_to_check.csv", trace_daily)
 println("✓ Loaded daily data: $(nrow(trace_daily)) observations")
 
 # ============================================================================
@@ -119,7 +195,7 @@ Sheets:
 - daily_1cusip: Daily prices for the problem bond
 - daily_others: Daily prices for all bonds from same issuer
 """
-function write_error_file(trace_intraday, trace_daily, bonds, cm, cusip; write_=true, out_path=EXCEL_PATH)
+function write_error_file(trace_intraday, trace_daily, bonds, cm, cusip; write_=true, out_path=ERROR_CHECK_DIR)
     # Match intraday data
     begin
         trace_matched = innerjoin(trace_intraday, cm, on=[:cusip6], makeunique=true)
@@ -197,7 +273,7 @@ end
 
 Create Excel files for all bonds with extreme returns.
 """
-function write_error_files(trace_intraday, trace_daily, bonds, cusips_months; start_idx=1, out_path=EXCEL_PATH)
+function write_error_files(trace_intraday, trace_daily, bonds, cusips_months; start_idx=1, out_path=ERROR_CHECK_DIR)
     cusips = cusips_months[:, [:cusip]] |> unique
 
     println("\nGenerating $(nrow(cusips)) Excel files for manual review...")
@@ -216,10 +292,10 @@ function write_error_files(trace_intraday, trace_daily, bonds, cusips_months; st
 end
 
 # ============================================================================
-# STEP 4: PREPARE DATA FOR EXCEL EXPORT
+# STEP 6: PREPARE DATA FOR EXCEL EXPORT
 # ============================================================================
 
-println("\n[4/5] Preparing data for Excel export...")
+println("\n[6/6] Preparing data for Excel export...")
 
 # Create date ranges for each extreme return
 cusips_months = bonds_extreme[:, [:cusip, :trade_date]]
@@ -237,13 +313,10 @@ transform!(groupby(trace_intraday, [:date, :trd_exctn_tm, :cusip]),
 
 println("✓ Prepared $(nrow(cusips_months)) date ranges for export")
 
-# ============================================================================
-# STEP 5: GENERATE EXCEL FILES
-# ============================================================================
+# Generate Excel files
+println("\nGenerating Excel files for manual review...")
 
-println("\n[5/5] Generating Excel files for manual review...")
-
-@time write_error_files(trace_intraday, trace_daily, bonds, cusips_months; out_path=EXCEL_PATH)
+@time write_error_files(trace_intraday, trace_daily, bonds, cusips_months; out_path=ERROR_CHECK_DIR)
 
 # ============================================================================
 # SUMMARY
@@ -253,18 +326,22 @@ println("\n" * "="^80)
 println("Error Detection Complete!")
 println("="^80)
 println("\nSummary:")
-println("  Extreme returns found: $(nrow(bonds_extreme))")
+println("  Full dataset date range: $(extrema(bonds.date)[1]) to $(extrema(bonds.date)[2])")
+println("  Already-reviewed errors excluded: $n_excluded")
+println("  New extreme returns found: $(nrow(bonds_extreme))")
 println("  Unique bonds affected: $(length(unique(bonds_extreme.cusip)))")
 println("  Excel files created: $(length(unique(cusips_months.cusip)))")
 println("\nExcel files location:")
-println("  $EXCEL_PATH")
+println("  $ERROR_CHECK_DIR")
 
 println("\n" * "="^80)
 println("Next Steps: Manual Review")
 println("="^80)
-println("1. Open Excel files in: $EXCEL_PATH")
+println("1. Open Excel files in: $ERROR_CHECK_DIR")
 println("2. Review each flagged return (marked_obs_ind = TRUE)")
 println("3. Check intraday/daily data for pricing errors vs. real trades")
-println("4. Mark errors in a separate tracking spreadsheet")
-println("5. Run merge_datasets.jl to combine clean data")
+println("4. Add reviewed errors to: $ERRORS_FILE")
+println("   Sheet: 'TRACE_error' with columns 'cusip', 'trade_date'")
+println("   Any row in the sheet will be excluded from future checks")
+println("5. Re-run this script to check for additional errors (reviewed ones will be excluded)")
 println()

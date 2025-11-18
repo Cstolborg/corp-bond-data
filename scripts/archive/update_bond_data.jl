@@ -124,7 +124,7 @@ addprocs(N_WORKERS, exeflags="--project")
 library(BondValuation)
 library(R.utils)
 """
-@everywhere include("../src/main.jl")
+@everywhere include("../../src/main.jl")
 
 # Prepare data
 trace_month = CSV.read(PATH*"trace_monthly.csv", DataFrame)
@@ -167,7 +167,6 @@ println("✓ Coupon schedules saved")
 # ============================================================================
 
 println("\n[8/10] Creating main bond return dataset...")
-include("../src/main.jl")
 
 trace_month = CSV.read(PATH*"trace_monthly.csv", DataFrame)
 rf = DataLoader.load_rf()

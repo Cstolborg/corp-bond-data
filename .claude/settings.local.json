@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(test:*)",
+      "Bash(julia:*)",
+      "Bash(python:*)",
+      "Bash(cat:*)",
+      "Bash(cmd /c \"julia --project=. tests/test_bonds_subset.jl\")",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

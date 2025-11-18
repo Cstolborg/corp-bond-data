@@ -12,20 +12,18 @@ using Distributed
 
 
 include("../../src/main.jl")
-include("../utils/utils_clean_data.jl")
+include("utils_clean_data.jl")
 include("../../config/update_config.jl")
 
-R""" 
+R"""
 library(BondValuation)
 library(R.utils)
 """
 
-
 println("\n" * "="^80)
 println("Creating Bond Data")
 println("="^80)
-println("Time period: $TIMEPERIOD")
-println("Output path: $PATH")
+println("CPU cores detected: $(Sys.CPU_THREADS)")
 println("Workers: $N_WORKERS")
 println("="^80 * "\n")
 
@@ -43,7 +41,7 @@ library(R.utils)
 #### DATA CREATION BEGINS HERE  ####
 
 
-@time trace_intraday = DataLoader.load_trace_intraday(;file=file="data/wrds/trace_prices.sas7bdat")
+@time trace_intraday = DataLoader.load_trace_intraday(file="data/wrds/trace_prices.sas7bdat")
 
 
 # Compute reversal flags
@@ -74,9 +72,9 @@ CSV.write("data/output/illiq.csv", illiq)
 trace_month = Preprocess.agg_daily_trace_to_month(trace_daily)
 CSV.write("data/output/trace_monthly.csv", trace_month)
 
+trace_intraday = nothing  # Free memory
+
 ###############################################
-
-
 
 ### CREATE RISK MEASURES ###
 fisd = Preprocess.Fisd()
@@ -143,7 +141,6 @@ CSV.write("data/output/bonds.csv", bonds)
 
 ##### COMPUTE TREASURY RISK MEASURES  ###################
 
-#bonds = CSV.read("data/output/warga_ice_trace.csv", DataFrame)
 bonds = CSV.read("data/output/bonds.csv", DataFrame)
 
 gdf = groupby(bonds, :cusip, sort=true)
@@ -175,7 +172,7 @@ bonds = CSV.read("data/output/bonds_full.csv", DataFrame)
 
 # Factor regressor
 
-factor_regressors = Pfs.FactorRegressor(bonds).factor_regressors
+factor_regressors = Pfs.FactorRegressor(bonds, trace_daily).factor_regressors
 factor_regressors = replace_nans(factor_regressors) |> x->dropmissing(x, :market)
 CSV.write("data/output/factor_regressors.csv", factor_regressors)
 println("✓ Factor regressors saved to data/output/factor_regressors.csv")
@@ -234,17 +231,31 @@ transform(gdf) do sdf
 end
 
 
-numcols = [:price_eom, :ret_eom, :ret_exc, :ret_exc_lead, :ret_texc_lead, :ret_eq, :value, :illiq, :rating_num, :MV, :amount_outstanding, :MV_lag, :MV_lead, :duration, :tmt, :convexity, :bond_age_pct, :bm, :yield_spread, :yield]
+numcols = [:price_eom, :ret_eom, :ret_exc, :ret_exc_lead, :ret_texc, :ret_eq, :value, :illiq, :rating_num, :MV, :amount_outstanding, :MV_lag, :MV_lead, :duration, :tmt, :convexity, :bond_age_pct, :bm, :yield_spread, :yield]
 firms = Preprocess.compute_firm_ret(bonds, numcols; firm_id=:permno, duration_adjust=true)
+
+transform!(bonds, :rating_num=>ByRow(x->rating_conversion[round(x)])=>:rating)
+transform!(firms, :rating_num=>ByRow(x->rating_conversion[round(x)])=>:rating)
+
+
+
 
 
 # Save final datasets
 CSV.write("data/output/bonds_full.csv", bonds)
 CSV.write("data/output/firms.csv", firms)
 
-# Keep a copy in data/data_to_share
-CSV.write("data/data_to_share/bonds_full.csv", bonds)
-CSV.write("data/data_to_share/firms.csv", firms)
+bonds_subset = select(bonds, :cusip, :permno, :date, :name, :MV, :price_eom, :ret_eom, :ret_exc, :ret_texc, :duration, :yield, :tmt, :rating=>:rating_group, :rating_num, :ret_eq, :value, :bond_age_pct, :yield_spread, :amount_outstanding)
+firms_subset = select(firms, :permno, :date, :MV, :price_eom, :ret_eom, :ret_exc, :ret_texc, :duration, :yield, :tmt, :rating=>:rating_group, :rating_num, :ret_eq, :value, :bond_age_pct, :yield_spread, :amount_outstanding)
+firms_subset = leftjoin(firms_subset, dropmissing(bonds_subset, :permno)[:, [:permno, :date, :name]], on=[:permno, :date])
+select!(firms_subset, :permno, :date, :name, :MV, :)
+
+# Subset to dates <= LAST_DATE
+@subset!(bonds_subset, :date .<= LAST_DATE)
+@subset!(firms_subset, :date .<= LAST_DATE)
+
+CSV.write("data/data_to_share/bonds.csv", bonds_subset)
+CSV.write("data/data_to_share/firms.csv", firms_subset)
 
 ######################################################################################################
 

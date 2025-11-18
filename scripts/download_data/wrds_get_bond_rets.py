@@ -57,8 +57,8 @@ def load_cusip_permno_gvkey(conn):
     return crsp_link
 
 if __name__ == '__main__':
-    #PATH = "./data/wrds/"
-    PATH = r'c:\\Users\\chris\\CBS Dropbox\\Christian Stolborg\\corp-bond-data\\data\\wrds\\'
+    PATH = "./data/wrds/"
+    #PATH = r'c:\\Users\\chris\\CBS Dropbox\\Christian Stolborg\\corp-bond-data\\data\\wrds\\'
 
     # Direct download from FRED (no API key or extra packages needed!)
     # ICE BofA 15+ Year US Corporate Index Total Return Index Value

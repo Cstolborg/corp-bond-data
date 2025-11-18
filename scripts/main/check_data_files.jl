@@ -4,10 +4,10 @@
 Check that all required data files are present before running create_datasets.jl
 
 Usage:
-    julia --project=. scripts/check_data_files.jl
+    julia --project=. scripts/main/check_data_files.jl
 
 Or include in REPL:
-    include("scripts/check_data_files.jl")
+    include("scripts/main/check_data_files.jl")
     check_all_data_files()
 """
 
@@ -15,6 +15,8 @@ using Dates
 using CSV
 using DataFrames
 using Downloads
+
+# (Configuration no longer needed - checking main files only)
 
 """
     check_file_exists(filepath::String, description::String)
@@ -85,13 +87,14 @@ end
     check_all_data_files()
 
 Check all required data files for create_datasets.jl pipeline.
-Returns true if all files are present, false otherwise.
+Throws AssertionError if any required files are missing.
 """
 function check_all_data_files()
     println("\n" * "="^80)
     println("Checking Data Files for create_datasets.jl Pipeline")
     println("="^80 * "\n")
 
+    missing_files = String[]
     all_present = true
 
     # =========================================================================
@@ -101,71 +104,80 @@ function check_all_data_files()
     println("REQUIRED INPUT FILES:")
     println("-" * "="^79 * "\n")
 
-    # TRACE intraday data
+    # TRACE intraday data - check main file
     println("[1] TRACE Intraday Data")
-    all_present &= check_file_exists(
-        "data/wrds/trace_prices.sas7bdat",
-        "TRACE intraday trading data (SAS format)"
-    )
+    trace_main = "data/wrds/trace_prices.sas7bdat"
+    if !check_file_exists(trace_main, "TRACE intraday trading data (SAS format)")
+        push!(missing_files, trace_main)
+        all_present = false
+    end
     println()
 
-    # FISD data files
+    # FISD data files (now in data/wrds/)
     println("[2] FISD (Mergent) Bond Characteristics")
-    all_present &= check_file_exists(
-        "data/mergent/fisd_issue.sas7bdat",
-        "FISD issue characteristics"
-    )
+    fisd_issue = "data/wrds/fisd_issue.sas7bdat"
+    if !check_file_exists(fisd_issue, "FISD issue characteristics")
+        push!(missing_files, fisd_issue)
+        all_present = false
+    end
     println()
 
     println("[3] FISD Ratings")
-    all_present &= check_file_exists(
-        "data/mergent/fisd_ratings.sas7bdat",
-        "FISD time-varying credit ratings"
-    )
+    fisd_ratings = "data/wrds/fisd_ratings.sas7bdat"
+    if !check_file_exists(fisd_ratings, "FISD time-varying credit ratings")
+        push!(missing_files, fisd_ratings)
+        all_present = false
+    end
     println()
 
     println("[4] FISD Defaults")
-    all_present &= check_file_exists(
-        "data/mergent/fisd_defaults.sas7bdat",
-        "FISD default dates"
-    )
+    fisd_defaults = "data/wrds/fisd_defaults.sas7bdat"
+    if !check_file_exists(fisd_defaults, "FISD default dates")
+        push!(missing_files, fisd_defaults)
+        all_present = false
+    end
     println()
 
     println("[5] FISD Amount Outstanding")
-    all_present &= check_file_exists(
-        "data/mergent/fisd_amt_out.sas7bdat",
-        "FISD latest amount outstanding"
-    )
+    fisd_amt_out = "data/wrds/fisd_amt_out.sas7bdat"
+    if !check_file_exists(fisd_amt_out, "FISD latest amount outstanding")
+        push!(missing_files, fisd_amt_out)
+        all_present = false
+    end
     println()
 
     println("[6] FISD Amount Outstanding (Historical)")
-    all_present &= check_file_exists(
-        "data/mergent/fisd_amt_out_hist.sas7bdat",
-        "FISD historical amount outstanding"
-    )
+    fisd_amt_hist = "data/wrds/fisd_amt_out_hist.sas7bdat"
+    if !check_file_exists(fisd_amt_hist, "FISD historical amount outstanding")
+        push!(missing_files, fisd_amt_hist)
+        all_present = false
+    end
     println()
 
     # WRDS/CRSP data
     println("[7] Bond-CRSP Link")
-    all_present &= check_file_exists(
-        "data/wrds/bondcrsp_link.sas7bdat",
-        "CUSIP to PERMNO/GVKEY mapping"
-    )
+    bondcrsp_link = "data/wrds/bondcrsp_link.sas7bdat"
+    if !check_file_exists(bondcrsp_link, "CUSIP to PERMNO/GVKEY mapping")
+        push!(missing_files, bondcrsp_link)
+        all_present = false
+    end
     println()
 
     println("[8] Fama-French Daily Factors")
-    all_present &= check_file_exists(
-        "data/wrds/ff_daily.csv",
-        "Fama-French daily factors and risk-free rate"
-    )
+    ff_daily = "data/wrds/ff_daily.csv"
+    if !check_file_exists(ff_daily, "Fama-French daily factors and risk-free rate")
+        push!(missing_files, ff_daily)
+        all_present = false
+    end
     println()
 
-    # Bond-Equity Link
-    println("[9] Bond-Equity Link (Additional)")
-    all_present &= check_file_exists(
-        "data/BondEqLink.csv",
-        "Additional CUSIP to PERMNO mapping"
-    )
+    # Stocks data (created by stocks.sas)
+    println("[9] Equity Returns Data")
+    stocks = "data/wrds/stocks.csv"
+    if !check_file_exists(stocks, "Equity returns (from stocks.sas)")
+        push!(missing_files, stocks)
+        all_present = false
+    end
     println()
 
     # =========================================================================
@@ -230,15 +242,22 @@ function check_all_data_files()
     if all_present
         println("✓ ALL REQUIRED FILES ARE PRESENT!")
         println("\nYou can now run the pipeline:")
-        println("  julia --project=. scripts/create_datasets.jl")
+        println("  julia --project=. scripts/main/create_datasets.jl")
         println()
         return true
     else
         println("✗ SOME REQUIRED FILES ARE MISSING!")
+        println("\nMissing files:")
+        for file in missing_files
+            println("  - $file")
+        end
         println("\nPlease download the missing files before running the pipeline.")
         println("See docs/DATA_REQUIREMENTS.md for download instructions.")
         println()
-        return false
+
+        # Throw AssertionError with list of missing files
+        error_msg = "Missing $(length(missing_files)) required data file(s):\n" * join(missing_files, "\n")
+        throw(AssertionError(error_msg))
     end
 end
 
@@ -271,7 +290,20 @@ end
 
 # Run checks if script is executed directly
 if abspath(PROGRAM_FILE) == @__FILE__
-    result = check_all_data_files()
-    check_trace_file_info()
-    exit(result ? 0 : 1)
+    try
+        result = check_all_data_files()
+        check_trace_file_info()
+        exit(0)
+    catch e
+        if e isa AssertionError
+            println("\n" * "="^80)
+            println("ERROR: Data validation failed")
+            println("="^80)
+            println(e.msg)
+            println()
+            exit(1)
+        else
+            rethrow(e)
+        end
+    end
 end
