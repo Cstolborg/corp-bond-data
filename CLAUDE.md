@@ -11,7 +11,6 @@ This is a Julia-based pipeline for processing corporate bond market data from TR
 - **FISD** (Mergent): Bond characteristics, ratings, amounts outstanding (from WRDS via SAS)
 - **WRDS**: Bond-equity links, Fama-French factors
 - **Treasury/GSW**: Risk-free rates and yield curves (auto-downloaded from Fed)
-- **ICE/Warga** (Optional): Additional/historical bond pricing
 
 **Runtime:** Full pipeline takes 5-9 hours; bond yield calculations via R's BondValuation package are the main bottleneck (4-8 hours).
 
@@ -33,23 +32,20 @@ julia --project=. -e 'using RCall; R"library(BondValuation)"'
 **Main Pipeline** (full historical data):
 ```bash
 julia --project=. scripts/main/check_data_files.jl      # Verify data
-julia --project=. scripts/main/create_datasets.jl       # 5-9 hours
-julia --project=. scripts/main/create_factor_data.jl    # 30-60 min
+julia --project=. scripts/main/create_datasets.jl       # 5-9 hours (complete pipeline)
 ```
 
 **Error Checking Workflow** (after running main pipeline):
 ```bash
-julia --project=. scripts/update/check_for_errors.jl    # 5-10 min
+julia --project=. scripts/main/check_for_errors.jl      # 5-10 min
 # Manual review of Excel files in data/error_checks/excel_YYYY_MM_DD/
-# Add reviewed errors to data/error_checks/errors.xlsx (columns: cusip, date)
+# Add reviewed errors to data/error_checks/errors.xlsx (sheet: TRACE_error, cols: cusip, trade_date)
 # Re-run check_for_errors.jl to check for additional errors (reviewed ones excluded)
 ```
 
-**Other utilities:**
+**Optional utilities:**
 ```bash
-julia --project=. scripts/preprocessing/preprocess_new_ice.jl  # ICE data
-julia --project=. scripts/export/data_to_share.jl              # Export datasets
-python scripts/download_data/wrds_get_bond_rets.py             # WRDS downloads
+python scripts/download_data/wrds_get_bond_rets.py     # Optional WRDS downloads
 ```
 
 ## Architecture
@@ -71,40 +67,36 @@ corp-bond-data/
 │   ├── utils.jl                # Utility functions
 │   └── rating_conversions.jl   # Rating mappings
 │
-├── scripts/                     # Pipeline scripts (ORGANIZED)
+├── scripts/                     # Pipeline scripts
 │   ├── download_data/          # Data download scripts (RUN FIRST!)
 │   │   ├── trace_filter.sas   # TRACE extraction (SAS Studio)
 │   │   ├── get_fisd.sas       # FISD extraction (SAS Studio)
 │   │   ├── stocks.sas         # Bond-equity links (SAS Studio)
 │   │   └── wrds_get_bond_rets.py  # Optional WRDS downloads (Python)
-│   ├── main/                   # Main pipeline
-│   │   ├── check_data_files.jl
-│   │   ├── create_datasets.jl
-│   │   ├── create_factor_data.jl
-│   │   └── create_characteristics.jl
-│   ├── update/                 # Error checking
-│   │   └── check_for_errors.jl
-│   ├── preprocessing/          # Data preprocessing
-│   │   └── preprocess_new_ice.jl
-│   ├── export/                 # Data export
-│   │   └── data_to_share.jl
-│   ├── utils/                  # Shared utilities
-│   │   └── utils_clean_data.jl  # Cleaning functions
+│   └── main/                   # Main pipeline
+│       ├── check_data_files.jl    # Verify data files
+│       ├── create_datasets.jl     # Complete pipeline (5-9 hours)
+│       ├── check_for_errors.jl    # Error detection workflow
+│       └── utils_clean_data.jl    # Cleaning utilities
 │
 ├── data/                       # Data directory
 │   ├── wrds/                  # ALL WRDS data (TRACE, FISD, links, FF factors)
-│   ├── output/                # Pipeline outputs
+│   ├── data_to_share/         # PRIMARY OUTPUTS (end user datasets)
+│   ├── output/                # Pipeline outputs (internal use)
 │   ├── error_checks/          # Error checking files
-│   │   ├── errors.xlsx        # Already-reviewed errors (cusip, date)
+│   │   ├── errors.xlsx        # Already-reviewed errors (sheet: TRACE_error)
 │   │   └── excel_YYYY_MM_DD/  # Excel files for manual review
 │   └── BondEqLink.csv         # Additional bond-equity links
-├── tests/                      # Test files
-│   ├── test_bonds_subset.jl   # Test script for bonds_subset.csv
-│   └── bonds_full_test.csv    # Expected output for testing
 │
-└── docs/                       # Documentation
-    ├── PIPELINE_WORKFLOW.md
-    └── DATA_REQUIREMENTS.md
+├── tests/                      # Test files
+│   ├── test_bonds_subset.jl   # Dataset validation tests
+│   └── bonds_full_test.csv    # Reference dataset
+│
+├── .gitignore                  # Git ignore rules
+├── Project.toml                # Julia dependencies
+├── Manifest.toml               # Julia dependency versions
+├── README.md                   # Project overview
+└── CLAUDE.md                   # This file - developer guide
 ```
 
 ### Module System
@@ -143,7 +135,7 @@ The codebase uses a modular architecture defined in `src/main.jl`:
 
 ### Pipeline Flow
 
-**Main Pipeline** (`scripts/main/create_datasets.jl`) sequence:
+**Main Pipeline** (`scripts/main/create_datasets.jl`) - Complete end-to-end pipeline:
 
 1. **Load TRACE intraday** → Filter outlier prices via reversal flags
 2. **Aggregate to daily** → `trace_daily.pq` (value-weighted)
@@ -155,22 +147,19 @@ The codebase uses a modular architecture defined in `src/main.jl`:
 6. **Date/coupon vectors** → `date_vectors_trace.csv`, `dates_trace.csv`
 7. **Bond returns** → `bonds.csv` (with temporal features, excess returns)
 8. **Treasury risk** → `treasury_risk_measures_trace.csv` (PARALLEL, 2-4 hours)
-9. **Save incomplete dataset** → `bonds_full.csv` (needs factors)
+9. **Factor construction** → `factor_regressors.csv`, `bond_factors.csv`
+10. **Value signals** → Add to bonds dataset
+11. **Equity links** → Update PERMNO/PERMCO
+12. **Final outputs** → `data/output/bonds_full.csv`, `data/output/firms_full.csv` (complete)
+13. **Export subsets** → `data/data_to_share/bonds.csv`, `data/data_to_share/firms.csv` (PRIMARY OUTPUTS)
 
-**Factor Pipeline** (`scripts/main/create_factor_data.jl`) sequence:
-
-10. **Factor construction** → `factor_regressors.csv`, `bond_factors.csv`
-11. **Value signals** → Add to bonds dataset
-12. **Equity links** → Update PERMNO/PERMCO
-13. **Final dataset** → `bonds_full.csv` (COMPLETE with all features)
-
-**Error Checking Workflow** (`scripts/update/check_for_errors.jl`) sequence:
+**Error Checking Workflow** (`scripts/main/check_for_errors.jl`) sequence:
 
 1. **Run script** → `check_for_errors.jl` identifies extreme returns across entire dataset
 2. **Exclude reviewed** → Automatically excludes returns already in `data/error_checks/errors.xlsx`
 3. **Generate Excel files** → Creates detailed workbooks for manual review
 4. **Manual review** → User reviews Excel files to classify errors vs. real market events
-5. **Document errors** → Add reviewed (cusip, date) pairs to `errors.xlsx`
+5. **Document errors** → Add reviewed (cusip, trade_date) pairs to `errors.xlsx` (sheet: TRACE_error)
 6. **Re-run** → Re-run script to check for additional errors (reviewed ones excluded)
 
 ### Configuration System
@@ -181,7 +170,7 @@ This is the centralized configuration file for the entire pipeline.
 
 **Used by:**
 - `scripts/main/create_datasets.jl` (main pipeline)
-- `scripts/update/check_for_errors.jl` (error checking)
+- `scripts/main/check_for_errors.jl` (error checking)
 
 **Key configuration parameters:**
 
@@ -213,18 +202,21 @@ data/
 │
 ├── BondEqLink.csv      # Additional CUSIP-PERMNO mapping
 │
-└── output/             # All pipeline outputs
-    ├── trace_daily.pq          # Main daily prices
-    ├── bonds_full.csv          # Main analysis dataset
-    ├── illiq.csv               # Liquidity measures
-    ├── factor_regressors.csv   # Factor data
-    ├── gsw.csv                 # GSW treasury curve (auto-downloaded)
-    │
-    └── update_2025_11_11/      # Update pipeline outputs
-        ├── trace_daily_2024_2025.pq
-        ├── bonds_full.csv
-        ├── illiq_2024_2025.csv
-        └── excel_files/        # Error review Excel files
+├── data_to_share/      # PRIMARY OUTPUTS (end user datasets)
+│   ├── bonds.csv               # Bond-level dataset
+│   └── firms.csv               # Firm-level dataset
+│
+├── output/             # Pipeline outputs (internal use)
+│   ├── trace_daily.pq          # Main daily prices
+│   ├── bonds_full.csv          # Complete bond-level dataset
+│   ├── firms_full.csv          # Complete firm-level dataset
+│   ├── illiq.csv               # Liquidity measures
+│   ├── factor_regressors.csv   # Factor data
+│   └── gsw.csv                 # GSW treasury curve (auto-downloaded)
+│
+└── error_checks/       # Error checking workflow
+    ├── errors.xlsx             # Reviewed errors (sheet: TRACE_error)
+    └── excel_YYYY_MM_DD/       # Excel files for manual review
 ```
 
 ## Important Technical Details
@@ -237,7 +229,7 @@ using Distributed
 addprocs(8, exeflags="--project")  # Add 8 workers
 @everywhere using DataFramesMeta, RCall
 @everywhere R"library(BondValuation)"
-@everywhere include("../../src/main.jl")  # Note: paths updated for new structure
+@everywhere include("../../src/main.jl")  # Load all modules
 
 # Split data and parallel map
 partitions = [...split grouped data...]
@@ -326,9 +318,9 @@ add_temporal_features(bonds; trace=true, file=PATH*"date_vectors_trace.csv")
 ### Adding New Features
 
 1. **Modify modules in `src/`**: Changes automatically picked up via `include()`
-2. **Update config**: Edit `config/data_paths.jl` or `config/update_config.jl` for new paths/parameters
+2. **Update config**: Edit `config/update_config.jl` for new paths/parameters
 3. **Test incrementally**: Load modules in REPL and test functions
-4. **Run full pipeline**: After testing, run relevant script in `scripts/main/` or `scripts/update/`
+4. **Run full pipeline**: After testing, run `scripts/main/create_datasets.jl`
 
 ### Testing Changes
 
@@ -350,14 +342,14 @@ df = DataLoader.load_trace_intraday()
 ### Common Development Tasks
 
 **Add new data source:**
-1. Add path constant in `config/data_paths.jl`
+1. Add path constant in `config/update_config.jl`
 2. Create loader function in `src/data_loader.jl`
 3. Export from DataLoader module in `src/main.jl`
 
 **Add new factor/signal:**
 1. Implement in `src/factors.jl`
 2. Export from Factors module
-3. Integrate into `scripts/main/create_factor_data.jl`
+3. Integrate into `scripts/main/create_datasets.jl`
 
 **Modify bond filtering:**
 - Edit `Preprocess.filter_bonds!()` in `src/preprocessing.jl`
@@ -368,17 +360,15 @@ df = DataLoader.load_trace_intraday()
 - Optimal: match number of physical CPU cores
 
 **Update script organization:**
-- Scripts are now organized in subdirectories (`main/`, `update/`, etc.)
-- All `include()` paths use relative paths: `../../src/main.jl`, `../utils/utils_clean_data.jl`
+- Scripts are in `scripts/main/` and `scripts/download_data/`
+- All `include()` paths use relative paths: `../../src/main.jl`, `utils_clean_data.jl`
 - When moving scripts, update include paths accordingly
 
 ## Data Requirements
 
-**See `docs/DATA_REQUIREMENTS.md` for detailed data download instructions.**
-
 **Required files (from WRDS SAS Studio - RUN FIRST):**
 
-All files go in `data/wrds/`:
+Run SAS scripts in `scripts/download_data/` on WRDS SAS Studio, then place all output files in `data/wrds/`:
 - `trace_prices.sas7bdat` (500MB-2GB) - TRACE intraday data
 - `fisd_issue.sas7bdat` - FISD bond characteristics
 - `fisd_ratings.sas7bdat` - FISD ratings
@@ -386,17 +376,14 @@ All files go in `data/wrds/`:
 - `fisd_amt_out.sas7bdat` - FISD amounts outstanding
 - `fisd_amt_out_hist.sas7bdat` - FISD amounts historical
 - `bondcrsp_link.sas7bdat` - Bond-equity links
+- `stocks.csv` - Stock returns
 - `ff_daily.csv` - Fama-French factors
 
 **Required files (other sources):**
-- `data/BondEqLink.csv` - Additional bond-equity mapping
+- `data/BondEqLink.csv` - Additional bond-equity mapping (provided separately)
 
 **Auto-downloaded:**
 - `data/output/gsw.csv` (Treasury curve parameters from Federal Reserve)
-
-**Optional:**
-- `data/ice_new/ICE_GI00.csv` (for ICE pipeline)
-- Warga data (for historical/OOS analysis)
 
 ## Scripts Reference
 
@@ -405,19 +392,13 @@ All files go in `data/wrds/`:
 | Script | Purpose | Runtime | Key Outputs |
 |--------|---------|---------|-------------|
 | `check_data_files.jl` | Verify data, download GSW | 1 min | gsw.csv |
-| `create_datasets.jl` | Main TRACE pipeline | 5-9 hrs | trace_daily.pq, bonds_full.csv (incomplete) |
-| `create_factor_data.jl` | Factor construction | 30-60 min | factor_regressors.csv, bonds_full.csv (complete) |
-| `create_characteristics.jl` | Bond characteristics | Variable | Characteristic portfolios |
-
-### Error Checking (`scripts/update/`)
-
-| Script | Purpose | Runtime | Key Outputs |
-|--------|---------|---------|-------------|
+| `create_datasets.jl` | Complete pipeline (TRACE → factors → output) | 5-9 hrs | PRIMARY: data_to_share/bonds.csv, data_to_share/firms.csv; Also: data/output/* |
 | `check_for_errors.jl` | Error detection across full dataset | 5-10 min | Excel files in error_checks/excel_YYYY_MM_DD/ |
+| `utils_clean_data.jl` | Shared cleaning utilities | N/A | Used by other scripts |
 
-**Configuration:** Edit `config/update_config.jl` to customize error detection parameters.
+**Configuration:** Edit `config/update_config.jl` to customize pipeline parameters.
 
-**Workflow:** Run after `create_datasets.jl` → manually review Excel files → add reviewed errors to `data/error_checks/errors.xlsx` → re-run to check for additional errors.
+**Error Checking Workflow:** Run `check_for_errors.jl` after `create_datasets.jl` → manually review Excel files → add reviewed errors to `data/error_checks/errors.xlsx` (sheet: TRACE_error) → re-run to check for additional errors.
 
 ### Data Download Scripts (`scripts/download_data/`)
 
@@ -428,11 +409,6 @@ All files go in `data/wrds/`:
 
 **Python script (optional):**
 - `wrds_get_bond_rets.py` - Additional WRDS downloads
-
-### Other Scripts
-
-- `scripts/preprocessing/preprocess_new_ice.jl` - ICE data preprocessing
-- `scripts/export/data_to_share.jl` - Create shareable datasets
 
 ### Testing Scripts (`tests/`)
 
@@ -468,32 +444,30 @@ Julia packages (from Project.toml):
 - GLM, StatsBase, Statistics
 - ShiftedArrays, Roots, Dates, XLSX
 
-## Recent Changes (2025-11-11/12)
+## Recent Changes (2025-11-19)
 
-1. **Scripts reorganized** into subdirectories:
-   - `scripts/download_data/` - Data download scripts (SAS + Python) - RUN FIRST
-   - `scripts/main/` - Main pipeline
-   - `scripts/update/` - Update pipeline
-   - `scripts/preprocessing/` - Data preprocessing (ICE)
-   - `scripts/export/` - Data export
-   - `scripts/utils/` - Shared utilities
+1. **Major cleanup** - Removed obsolete files and directories:
+   - Deleted `docs/` directory (content moved to README.md and CLAUDE.md)
+   - Deleted `scripts/archive/` (obsolete scripts)
+   - Deleted empty data directories (`data/ice_new/`, `data/data_to_share/`, `data/output/update_2025_11_11/`)
+   - All active functionality preserved in `scripts/main/` and `src/`
 
-2. **Configuration centralized** in `config/`:
-   - `config/data_paths.jl` - Main pipeline
-   - `config/update_config.jl` - Update pipeline (single source of truth)
+2. **Pipeline consolidation**:
+   - `create_datasets.jl` now runs complete end-to-end pipeline (TRACE → factors → output)
+   - Removed separate `create_factor_data.jl` script (functionality integrated)
+   - Single script produces all outputs: `bonds_full.csv`, `firms.csv`, `bonds.csv`, `firms.csv`
 
-3. **Update pipeline refactored**:
-   - `merge_datasets.jl` now OVERWRITES main files in `data/output/`
-   - No manual file copying needed
-   - Error detection via Excel file export
+3. **Error checking workflow simplified**:
+   - `check_for_errors.jl` moved to `scripts/main/`
+   - Error format: Excel sheet "TRACE_error" with columns `cusip`, `trade_date`
+   - Any row in sheet is considered a reviewed error (no additional filtering)
 
-4. **Utility functions enhanced**:
-   - `add_temporal_features()` now accepts custom file paths
-   - `get_dates()` now accepts custom file paths
-   - Reversal flags correctly placed before daily aggregation
+4. **Project structure streamlined**:
+   - Only 2 script directories: `scripts/main/` and `scripts/download_data/`
+   - All utilities in `scripts/main/utils_clean_data.jl`
+   - Configuration centralized in `config/update_config.jl`
 
-5. **Documentation improved**:
-   - README.md - Complete installation and execution order
-   - scripts/README.md - Scripts reference
-   - config/README.md - Configuration guide
-   - Emphasizes SAS Studio prerequisite
+5. **Documentation consolidated**:
+   - README.md - Project overview and quick start
+   - CLAUDE.md - Complete developer guide (this file)
+   - All configuration and script documentation integrated into main docs

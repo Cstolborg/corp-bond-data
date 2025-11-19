@@ -27,6 +27,7 @@ data/error_checks/*
 !data/error_checks/.gitkeep
 
 # Test outputs
+tests/*.csv
 tests/old_output/*
 !tests/old_output/.gitkeep
 
