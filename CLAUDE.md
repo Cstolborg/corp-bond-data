@@ -313,6 +313,15 @@ add_temporal_features(bonds; trace=true)
 add_temporal_features(bonds; trace=true, file=PATH*"date_vectors_trace.csv")
 ```
 
+### Factor Construction
+
+The pipeline implements multiple factor models:
+- **Market Factor**: Value-weighted bond market return
+- **Size Factor**: Small vs. large bonds (by market value)
+- **Value Factor**: High vs. low yield spreads
+- **Credit Factor**: Investment grade vs. high yield
+- **BBW Factors**: VaR and liquidity risk (Bai, Bali & Wen, 2019)
+
 ## Development Workflow
 
 ### Adding New Features
@@ -443,6 +452,28 @@ Julia packages (from Project.toml):
 - Distributed (parallel processing)
 - GLM, StatsBase, Statistics
 - ShiftedArrays, Roots, Dates, XLSX
+
+## Troubleshooting
+
+### Common Issues
+
+**"Package BondValuation not found"**
+```r
+install.packages("BondValuation")
+install.packages("R.utils")
+```
+
+**RCall cannot find R**
+```julia
+ENV["R_HOME"] = "C:/Program Files/R/R-4.4.3"  # Adjust path
+using Pkg; Pkg.build("RCall")
+```
+
+**Out of memory errors**
+- Reduce `N_WORKERS` in `config/update_config.jl` (try 4 instead of 8)
+
+**"File not found: trace_prices.sas7bdat"**
+- Run SAS scripts in `scripts/download_data/` on WRDS SAS Studio first
 
 ## Recent Changes (2025-11-19)
 
