@@ -247,7 +247,9 @@ CSV.write("data/output/firms.csv", firms)
 
 bonds_subset = select(bonds, :cusip, :permno, :date, :name, :MV, :price_eom, :ret_eom, :ret_exc, :ret_texc, :duration, :yield, :tmt, :rating=>:rating_group, :rating_num, :ret_eq, :value, :bond_age_pct, :yield_spread, :amount_outstanding)
 firms_subset = select(firms, :permno, :date, :MV, :price_eom, :ret_eom, :ret_exc, :ret_texc, :duration, :yield, :tmt, :rating=>:rating_group, :rating_num, :ret_eq, :value, :bond_age_pct, :yield_spread, :amount_outstanding)
-firms_subset = leftjoin(firms_subset, dropmissing(bonds_subset, :permno)[:, [:permno, :date, :name]], on=[:permno, :date])
+# Get unique name per (permno, date) to avoid creating duplicate rows in join
+name_lookup = combine(first, groupby(dropmissing(bonds_subset, :permno), [:permno, :date]))[:, [:permno, :date, :name]]
+firms_subset = leftjoin(firms_subset, name_lookup, on=[:permno, :date])
 select!(firms_subset, :permno, :date, :name, :MV, :)
 
 # Subset to dates <= LAST_DATE
