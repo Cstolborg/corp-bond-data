@@ -3,11 +3,11 @@
 This repository contains the data processing pipeline code for the research paper:
 
 **"Corporate Bond Factors: Replication Failures and a New Framework"**
-Available at: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652
+Available at: [SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652)
 
 The data is published by WRDS.
-Bond-level data: https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-bonds/ 
-Firm-level data: https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-firms/
+- Bond-level data: [WRDS Corporate Bond Factors: Bonds](https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-bonds/)
+- Firm-level data: [WRDS Corporate Bond Factors: Firms](https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-firms/)
 
 ## Overview
 
