@@ -5,6 +5,10 @@ This repository contains the data processing pipeline code for the research pape
 **"Corporate Bond Factors: Replication Failures and a New Framework"**
 Available at: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4586652
 
+The data is published by WRDS.
+Bond-level data: https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-bonds/ 
+Firm-level data: https://wrds-www.wharton.upenn.edu/pages/get-data/contributed-data-forms/corporate-bond-factors-firms/
+
 ## Overview
 
 This project provides a Julia-based pipeline for processing U.S. corporate bond market data from TRACE (2002-2024), transforming raw trading records into analysis-ready datasets with computed risk measures, returns, and factor signals.
