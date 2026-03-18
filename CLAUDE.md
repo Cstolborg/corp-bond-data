@@ -126,7 +126,7 @@ The codebase uses a modular architecture defined in `src/main.jl`:
    - Portfolio construction and analysis
    - Performance evaluation
 
-**Key Utilities** (`src/utils.jl`, `scripts/utils/utils_clean_data.jl`, `src/rating_conversions.jl`):
+**Key Utilities** (`src/utils.jl`, `scripts/main/utils_clean_data.jl`, `src/rating_conversions.jl`):
 - Date conversions, rating mappings
 - Liquidity measures (Amihud illiquidity)
 - Temporal feature functions
@@ -267,7 +267,7 @@ Standard bond filters (in `Preprocess.filter_bonds!()`):
 
 **CRITICAL:** Must be computed BEFORE daily aggregation, not after.
 
-From `scripts/utils/utils_clean_data.jl`:
+From `scripts/main/utils_clean_data.jl`:
 ```julia
 function compute_reversal_flags!(df; price_col::Symbol=:price)
     # Flags prices that are 2x neighbors or 0.5x neighbors
@@ -292,14 +292,14 @@ Ratings converted to 1-22 numeric scale via `src/rating_conversions.jl`:
 
 ### Liquidity Measures
 
-Amihud illiquidity computed in `scripts/utils/utils_clean_data.jl`:
+Amihud illiquidity computed in `scripts/main/utils_clean_data.jl`:
 - Function: `compute_illiq(trace_daily)`
 - Requires minimum price pairs (default: 5)
 - Maximum days between prices (default: 7)
 
 ### Temporal Features
 
-From `scripts/utils/utils_clean_data.jl`:
+From `scripts/main/utils_clean_data.jl`:
 - `get_dates()` - Load coupon date vectors (supports custom file paths for update pipeline)
 - `get_temporal_features()` - Calculate time to next coupon
 - `add_temporal_features()` - Add features to bond dataset (supports custom file paths)
