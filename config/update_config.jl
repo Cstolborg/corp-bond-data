@@ -5,7 +5,7 @@ Main configuration file for the corporate bond data pipeline.
 
 Used by:
 - scripts/main/create_datasets.jl (main pipeline)
-- scripts/update/check_for_errors.jl (error checking)
+- scripts/main/check_for_errors.jl (error checking)
 
 USAGE: Simply include this file at the top of each script:
     include("../../config/update_config.jl")

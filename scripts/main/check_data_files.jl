@@ -252,7 +252,7 @@ function check_all_data_files()
             println("  - $file")
         end
         println("\nPlease download the missing files before running the pipeline.")
-        println("See docs/DATA_REQUIREMENTS.md for download instructions.")
+        println("See README.md or CLAUDE.md for download instructions.")
         println()
 
         # Throw AssertionError with list of missing files
