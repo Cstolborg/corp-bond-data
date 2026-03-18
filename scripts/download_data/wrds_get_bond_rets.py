@@ -94,8 +94,10 @@ if __name__ == '__main__':
     dt_cols = ["trace_startdt", "trace_enddt", "crsp_startdt", "crsp_enddt", "link_startdt", "link_enddt"]
     trace_links[dt_cols] = trace_links[dt_cols].apply(pd.to_datetime)
     trace_links.to_parquet(PATH + "link_table.pq")
+    trace_links.to_csv(PATH + "link_table.csv", index=False)
 
     # PERMNO, GVKEY, CUSIP from CRSP
     crsp_link = load_cusip_permno_gvkey(conn)
     crsp_link.to_parquet(PATH + "cusip_permno_gvkey.pq")
+    crsp_link.to_csv(PATH + "cusip_permno_gvkey.csv", index=False)
 
