@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Julia-based pipeline for processing corporate bond market data from TRACE, FISD, and ICE sources. The pipeline transforms raw bond trading data into analysis-ready datasets with computed risk measures, returns, and factor signals.
+This is a Julia-based pipeline for processing corporate bond market data from TRACE, FISD, and ICE sources. The pipeline transforms raw bond trading data into analysis-ready datasets with computed risk measures, returns, and factor signals. The final outputs (`data/data_to_share/bonds.csv` and `data/data_to_share/firms.csv`) are submitted back to WRDS for distribution.
 
 **Key Data Sources:**
 - **TRACE** (2002-2024): Primary intraday and daily trading data (from WRDS via SAS)
@@ -151,7 +151,7 @@ The codebase uses a modular architecture defined in `src/main.jl`:
 10. **Value signals** → Add to bonds dataset
 11. **Equity links** → Update PERMNO/PERMCO
 12. **Final outputs** → `data/output/bonds_full.csv`, `data/output/firms_full.csv` (complete)
-13. **Export subsets** → `data/data_to_share/bonds.csv`, `data/data_to_share/firms.csv` (PRIMARY OUTPUTS)
+13. **Export subsets** → `data/data_to_share/bonds.csv`, `data/data_to_share/firms.csv` (PRIMARY OUTPUTS — submitted to WRDS for distribution; bond/firm-level returns and characteristics only, no factor returns)
 
 **Error Checking Workflow** (`scripts/main/check_for_errors.jl`) sequence:
 
@@ -202,9 +202,9 @@ data/
 │
 ├── BondEqLink.csv      # Additional CUSIP-PERMNO mapping
 │
-├── data_to_share/      # PRIMARY OUTPUTS (end user datasets)
-│   ├── bonds.csv               # Bond-level dataset
-│   └── firms.csv               # Firm-level dataset
+├── data_to_share/      # PRIMARY OUTPUTS — submitted to WRDS for distribution
+│   ├── bonds.csv               # Bond-level returns and characteristics (subset of bonds_full.csv)
+│   └── firms.csv               # Firm-level returns and characteristics (aggregated by PERMNO)
 │
 ├── output/             # Pipeline outputs (internal use)
 │   ├── trace_daily.pq          # Main daily prices
@@ -401,7 +401,7 @@ Run SAS scripts in `scripts/download_data/` on WRDS SAS Studio, then place all o
 | Script | Purpose | Runtime | Key Outputs |
 |--------|---------|---------|-------------|
 | `check_data_files.jl` | Verify data, download GSW | 1 min | gsw.csv |
-| `create_datasets.jl` | Complete pipeline (TRACE → factors → output) | 5-9 hrs | PRIMARY: data_to_share/bonds.csv, data_to_share/firms.csv; Also: data/output/* |
+| `create_datasets.jl` | Complete pipeline (TRACE → bond returns → factor returns → output) | 5-9 hrs | PRIMARY: data_to_share/bonds.csv, data_to_share/firms.csv (submitted to WRDS); Also: data/output/factor_regressors_bbw.csv, data/output/* |
 | `check_for_errors.jl` | Error detection across full dataset | 5-10 min | Excel files in error_checks/excel_YYYY_MM_DD/ |
 | `utils_clean_data.jl` | Shared cleaning utilities | N/A | Used by other scripts |
 
